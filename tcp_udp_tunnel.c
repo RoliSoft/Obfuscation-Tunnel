@@ -43,6 +43,50 @@ static inline void obfuscate_message(char* message, int length)
     }
 }
 
+static inline unsigned short read_14bit(int fd)
+{
+    int shift = 0;
+    unsigned short value = 0;
+    unsigned char current = 0;
+    
+    do
+    {
+        if (shift == 2 * 7) // cap at 16383
+        {
+            printf("Size header seems to be corrupted, abandoning read.\n");
+            break;
+        }
+
+        socklen_t msglen = read(fd, &current, sizeof(unsigned char));
+
+        if (msglen == 0)
+        {
+            // propagate TCP closed event
+            return 0;
+        }
+
+        value |= (current & 0x7f) << shift;
+        shift += 7;
+    }
+    while ((current & 0x80) != 0);
+
+    return value;
+}
+
+static inline void write_14bit(unsigned short size, char* buffer, int* length)
+{
+    *length = 0;
+    unsigned short value = size;
+
+    while (value >= 0x80)
+    {
+        buffer[(*length)++] = value | 0x80;
+        value >>= 7;
+    }
+
+    buffer[(*length)++] = value;
+}
+
 int main()
 {
     int verbose = 0, obfuscate = 1, remotebound = 0, res;
@@ -152,24 +196,13 @@ int main()
         {
             // tcp -> udp
 
-            socklen_t msglen = read(clientfd, (char*)buffer, sizeof(unsigned short));
+            unsigned short toread = read_14bit(clientfd);
 
-            if (msglen == 0)
+            if (toread == 0)
             {
                 printf("TCP connection to client lost\n");
                 return EXIT_FAILURE;
             }
-
-            if (msglen != sizeof(unsigned short))
-            {
-                printf("Warning: read %d instead of %lu.\n", msglen, sizeof(unsigned short));
-                continue;
-            }
-
-            unsigned short toread = 0;
-            ((unsigned char*)&toread)[0] = buffer[0];
-            ((unsigned char*)&toread)[1] = buffer[1];
-            toread = ntohs(toread);
 
             if (toread > MTU_SIZE)
             {
@@ -181,7 +214,7 @@ int main()
 
             while (toread > 0)
             {
-                msglen = read(clientfd, (char*)buffer + (readsize - toread), toread);
+                socklen_t msglen = read(clientfd, (char*)buffer + (readsize - toread), toread);
 
                 if (verbose && toread != msglen)
                 {
@@ -191,7 +224,7 @@ int main()
                 toread -= msglen;
             }
 
-            if (verbose) printf("Received %d bytes from client\n", msglen);
+            if (verbose) printf("Received %d bytes from client\n", readsize);
             if (obfuscate) obfuscate_message(buffer, readsize);
 
             res = sendto(remotefd, (char*)buffer, readsize, 0, (const struct sockaddr *)&remoteaddr, remoteaddrlen);
@@ -206,12 +239,16 @@ int main()
             if (verbose) printf("Received %d bytes from remote\n", msglen);
             if (obfuscate) obfuscate_message(((char*)buffer) + sizeof(unsigned short), msglen);
 
-            unsigned short wirelen = htons(msglen);
-            
-            buffer[0] = ((unsigned char*)&wirelen)[0];
-            buffer[1] = ((unsigned char*)&wirelen)[1];
+            int sizelen = 0;
+            write_14bit(msglen, (char*)buffer, &sizelen);
+            int sizediff = sizeof(unsigned short) - sizelen;
 
-            res = write(clientfd, (char*)buffer, msglen + sizeof(unsigned short));
+            if (sizediff == 1)
+            {
+                buffer[1] = buffer[0];
+            }
+
+            res = write(clientfd, (char*)buffer + sizediff, msglen + sizelen);
         }
     }
 
