@@ -118,13 +118,13 @@ int main()
     fds[1].fd = remotefd;
     fds[1].events = POLLIN;
 
-    /*int i = 1;
+    int i = 1;
     setsockopt(clientfd, IPPROTO_TCP, TCP_NODELAY, (void *)&i, sizeof(i));
 #ifdef TCP_QUICKACK
     setsockopt(clientfd, IPPROTO_TCP, TCP_QUICKACK, (void *)&i, sizeof(i));
-#endif*/
+#endif
 
-    fcntl(clientfd, F_SETFL, O_NONBLOCK);
+    //fcntl(clientfd, F_SETFL, O_NONBLOCK);
 
     while (1)
     {
@@ -152,24 +152,66 @@ int main()
         {
             // tcp -> udp
 
-            socklen_t msglen = read(clientfd, (char*)buffer, MTU_SIZE);
+            socklen_t msglen = read(clientfd, (char*)buffer, sizeof(unsigned short));
+
+            if (msglen == 0)
+            {
+                printf("TCP connection to client lost\n");
+                return EXIT_FAILURE;
+            }
+
+            if (msglen != sizeof(unsigned short))
+            {
+                printf("Warning: read %d instead of %lu.\n", msglen, sizeof(unsigned short));
+                continue;
+            }
+
+            unsigned short toread = 0;
+            ((unsigned char*)&toread)[0] = buffer[0];
+            ((unsigned char*)&toread)[1] = buffer[1];
+            toread = ntohs(toread);
+
+            if (toread > MTU_SIZE)
+            {
+                printf("Incorrect size read from buffer, abandoning read.\n");
+                continue;
+            }
+
+            unsigned short readsize = toread;
+
+            while (toread > 0)
+            {
+                msglen = read(clientfd, (char*)buffer + (readsize - toread), toread);
+
+                if (verbose && toread != msglen)
+                {
+                    printf("Read partially, need %u more bytes.\n", toread - msglen);
+                }
+
+                toread -= msglen;
+            }
 
             if (verbose) printf("Received %d bytes from client\n", msglen);
-            if (obfuscate) obfuscate_message(buffer, msglen);
+            if (obfuscate) obfuscate_message(buffer, readsize);
 
-            res = sendto(remotefd, (char*)buffer, msglen, 0, (const struct sockaddr *)&remoteaddr, remoteaddrlen);
+            res = sendto(remotefd, (char*)buffer, readsize, 0, (const struct sockaddr *)&remoteaddr, remoteaddrlen);
         }
 
         if (fds[1].revents & POLLIN)
         {
             // udp -> tcp
 
-            socklen_t msglen = recvfrom(remotefd, (char*)buffer, MTU_SIZE, MSG_WAITALL, (struct sockaddr*)&remoteaddr, (unsigned int*)&remoteaddrlen);
+            socklen_t msglen = recvfrom(remotefd, ((char*)buffer) + sizeof(unsigned short), MTU_SIZE, MSG_WAITALL, (struct sockaddr*)&remoteaddr, (unsigned int*)&remoteaddrlen);
 
             if (verbose) printf("Received %d bytes from remote\n", msglen);
-            if (obfuscate) obfuscate_message(buffer, msglen);
+            if (obfuscate) obfuscate_message(((char*)buffer) + sizeof(unsigned short), msglen);
 
-            res = write(clientfd, (char*)buffer, msglen);
+            unsigned short wirelen = htons(msglen);
+            
+            buffer[0] = ((unsigned char*)&wirelen)[0];
+            buffer[1] = ((unsigned char*)&wirelen)[1];
+
+            res = write(clientfd, (char*)buffer, msglen + sizeof(unsigned short));
         }
     }
 

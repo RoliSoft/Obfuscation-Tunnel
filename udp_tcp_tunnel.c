@@ -15,8 +15,6 @@
 #define LOCAL_PORT 8080
 #define REMOTE_ADDR "rolisoft.go.ro"
 #define REMOTE_PORT 8080
-//#define REMOTE_ADDR "engage.cloudflareclient.com"
-//#define REMOTE_PORT 2408
 //#define REMOTE_ADDR "127.0.0.1"
 //#define REMOTE_PORT 8081
 #define MTU_SIZE 1500
@@ -45,10 +43,10 @@ static inline void obfuscate_message(char* message, int length)
 
 int main()
 {
-    int verbose = 1, obfuscate = 1, remotebound = 0, res;
+    int verbose = 0, obfuscate = 1, remotebound = 0, res;
     int serverfd, remotefd;
     struct pollfd fds[2];
-    char buffer[MTU_SIZE];
+    char buffer[MTU_SIZE + sizeof(unsigned short)];
     struct sockaddr_in localaddr, clientaddr, remoteaddr;
     int clientaddrlen = sizeof(clientaddr), remoteaddrlen = sizeof(remoteaddr);
 
@@ -104,13 +102,13 @@ int main()
     fds[1].fd = remotefd;
     fds[1].events = POLLIN;
 
-    /*int i = 1;
+    int i = 1;
     setsockopt(serverfd, IPPROTO_TCP, TCP_NODELAY, (void *)&i, sizeof(i));
 #ifdef TCP_QUICKACK
     setsockopt(serverfd, IPPROTO_TCP, TCP_QUICKACK, (void *)&i, sizeof(i));
-#endif*/
+#endif
 
-    fcntl(remotefd, F_SETFL, O_NONBLOCK);
+    //fcntl(remotefd, F_SETFL, O_NONBLOCK);
 
     if (obfuscate) printf("Header obfuscation enabled.\n");
 
@@ -140,24 +138,66 @@ int main()
         {
             // udp -> tcp
 
-            socklen_t msglen = recvfrom(serverfd, (char*)buffer, MTU_SIZE, MSG_WAITALL, (struct sockaddr*)&clientaddr, (unsigned int*)&clientaddrlen);
+            socklen_t msglen = recvfrom(serverfd, ((char*)buffer) + sizeof(unsigned short), MTU_SIZE, MSG_WAITALL, (struct sockaddr*)&clientaddr, (unsigned int*)&clientaddrlen);
 
             if (verbose) printf("Received %d bytes from client\n", msglen);
-            if (obfuscate) obfuscate_message(buffer, msglen);
+            if (obfuscate) obfuscate_message(((char*)buffer) + sizeof(unsigned short), msglen);
 
-            res = write(remotefd, (char*)buffer, msglen);
+            unsigned short wirelen = htons(msglen);
+
+            buffer[0] = ((unsigned char*)&wirelen)[0];
+            buffer[1] = ((unsigned char*)&wirelen)[1];
+
+            res = write(remotefd, (char*)buffer, msglen + sizeof(unsigned short));
         }
 
         if (fds[1].revents & POLLIN)
         {
             // tcp -> udp
 
-            socklen_t msglen = read(remotefd, (char*)buffer, MTU_SIZE);
+            socklen_t msglen = read(remotefd, (char*)buffer, sizeof(unsigned short));
+
+            if (msglen == 0)
+            {
+                printf("TCP connection to remote lost\n");
+                return EXIT_FAILURE;
+            }
+            
+            if (msglen != sizeof(unsigned short))
+            {
+                printf("Warning: read %d instead of %lu.\n", msglen, sizeof(unsigned short));
+                continue;
+            }
+
+            unsigned short toread = 0;
+            ((unsigned char*)&toread)[0] = buffer[0];
+            ((unsigned char*)&toread)[1] = buffer[1];
+            toread = ntohs(toread);
+
+            if (toread > MTU_SIZE)
+            {
+                printf("Incorrect size read from buffer, abandoning read.\n");
+                continue;
+            }
+
+            unsigned short readsize = toread;
+
+            while (toread > 0)
+            {
+                msglen = read(remotefd, (char*)buffer + (readsize - toread), toread);
+
+                if (verbose && toread != msglen)
+                {
+                    printf("Read partially, need %u more bytes.\n", toread - msglen);
+                }
+
+                toread -= msglen;
+            }
 
             if (verbose) printf("Received %d bytes from remote\n", msglen);
-            if (obfuscate) obfuscate_message(buffer, msglen);
+            if (obfuscate) obfuscate_message(buffer, readsize);
 
-            res = sendto(serverfd, (char*)buffer, msglen, 0, (const struct sockaddr *)&clientaddr, clientaddrlen);
+            res = sendto(serverfd, (char*)buffer, readsize, 0, (const struct sockaddr *)&clientaddr, clientaddrlen);
         }
     }
 
