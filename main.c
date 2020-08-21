@@ -2,6 +2,7 @@
 #include <stdlib.h>
 #include <unistd.h>
 #include <string.h>
+#include <netdb.h>
 #include <sys/poll.h>
 #include <sys/types.h>
 #include <sys/socket.h>
@@ -10,15 +11,15 @@
 
 #define LOCAL_ADDR "0.0.0.0"
 #define LOCAL_PORT 8080
-#define REMOTE_ADDR "5.15.36.143"
-#define REMOTE_PORT 8080
-//#define REMOTE_ADDR "162.159.192.1"
-//#define REMOTE_PORT 2408
+//#define REMOTE_ADDR "rolisoft.go.ro"
+//#define REMOTE_PORT 8080
+#define REMOTE_ADDR "engage.cloudflareclient.com"
+#define REMOTE_PORT 2408
 #define MTU_SIZE 1500
 
 #define min(X, Y) (((X) < (Y)) ? (X) : (Y))
 
-static inline void obfuscate(char* message, int length)
+static inline void obfuscate_message(char* message, int length)
 {
     int process = min(16, length);
 
@@ -40,7 +41,7 @@ static inline void obfuscate(char* message, int length)
 
 int main()
 {
-    int verbose = 0, remotebound = 0, res;
+    int verbose = 0, obfuscate = 0, remotebound = 0, res;
     int serverfd, remotefd;
     struct pollfd fds[2];
     char buffer[MTU_SIZE];
@@ -67,9 +68,17 @@ int main()
     localaddr.sin_port = htons(LOCAL_PORT);
     inet_pton(AF_INET, LOCAL_ADDR, &localaddr.sin_addr);
 
+    struct hostent* remotehost = gethostbyname(REMOTE_ADDR);
+
+    if (remotehost == NULL)
+    {
+        perror("failed to resolve remote host");
+        return EXIT_FAILURE;
+    }
+
+    memcpy(&remoteaddr.sin_addr, remotehost->h_addr_list[0], remotehost->h_length);
     remoteaddr.sin_family = AF_INET;
     remoteaddr.sin_port = htons(REMOTE_PORT);
-    inet_pton(AF_INET, REMOTE_ADDR, &remoteaddr.sin_addr);
 
     if (bind(serverfd, (const struct sockaddr *)&localaddr, sizeof(localaddr)) < 0)
     {
@@ -83,6 +92,8 @@ int main()
     fds[1].fd = remotefd;
     fds[1].events = POLLIN;
 
+    if (obfuscate) printf("Header obfuscation enabled.\n");
+
     while (1)
     {
         if (!remotebound)
@@ -90,49 +101,52 @@ int main()
             if (verbose) printf("Waiting for first packet from client...\n");
 
             socklen_t msglen = recvfrom(serverfd, (char*)buffer, MTU_SIZE, MSG_WAITALL, (struct sockaddr*)&clientaddr, (unsigned int*)&clientaddrlen);
-            if (verbose) printf("Received %d bytes from client\n", msglen);
 
-            obfuscate(buffer, msglen);
+            char clientaddrstr[INET_ADDRSTRLEN];
+            inet_ntop(AF_INET, &(clientaddr.sin_addr), clientaddrstr, INET_ADDRSTRLEN);
+            printf("Client connected from %s:%d\n", clientaddrstr, ntohs(clientaddr.sin_port));
+
+            if (verbose) printf("Received %d bytes from client\n", msglen);
+            if (obfuscate) obfuscate_message(buffer, msglen);
 
             res = sendto(remotefd, (char*)buffer, msglen, 0, (const struct sockaddr *)&remoteaddr, remoteaddrlen);
 
             remotebound = 1;
+            continue;
         }
-        else
+
+        if (verbose) printf("Polling...\n");
+
+        res = poll(fds, 2, (3 * 60 * 1000));
+        
+        if (res == 0)
         {
-            if (verbose) printf("Polling...\n");
+            continue;
+        }
+        else if (res < 0)
+        {
+            perror("poll failed");
+            return EXIT_FAILURE;
+        }
 
-            res = poll(fds, 2, (3 * 60 * 1000));
-            
-            if (res == 0)
-            {
-                continue;
-            }
-            else if (res < 0)
-            {
-                perror("poll failed");
-                return EXIT_FAILURE;
-            }
+        if (fds[0].revents == POLLIN)
+        {
+            socklen_t msglen = recvfrom(serverfd, (char*)buffer, MTU_SIZE, MSG_WAITALL, (struct sockaddr*)&clientaddr, (unsigned int*)&clientaddrlen);
 
-            if (fds[1].revents == POLLIN)
-            {
-                socklen_t msglen = recvfrom(remotefd, (char*)buffer, MTU_SIZE, MSG_WAITALL, (struct sockaddr*)&remoteaddr, (unsigned int*)&remoteaddrlen);
-                if (verbose) printf("Received %d bytes from remote\n", msglen);
+            if (verbose) printf("Received %d bytes from client\n", msglen);
+            if (obfuscate) obfuscate_message(buffer, msglen);
 
-                obfuscate(buffer, msglen);
+            res = sendto(remotefd, (char*)buffer, msglen, 0, (const struct sockaddr *)&remoteaddr, remoteaddrlen);
+        }
 
-                res = sendto(serverfd, (char*)buffer, msglen, 0, (const struct sockaddr *)&clientaddr, clientaddrlen);
-            }
+        if (fds[1].revents == POLLIN)
+        {
+            socklen_t msglen = recvfrom(remotefd, (char*)buffer, MTU_SIZE, MSG_WAITALL, (struct sockaddr*)&remoteaddr, (unsigned int*)&remoteaddrlen);
 
-            if (fds[0].revents == POLLIN)
-            {
-                socklen_t msglen = recvfrom(serverfd, (char*)buffer, MTU_SIZE, MSG_WAITALL, (struct sockaddr*)&clientaddr, (unsigned int*)&clientaddrlen);
-                if (verbose) printf("Received %d bytes from client\n", msglen);
+            if (verbose) printf("Received %d bytes from remote\n", msglen);
+            if (obfuscate) obfuscate_message(buffer, msglen);
 
-                obfuscate(buffer, msglen);
-
-                res = sendto(remotefd, (char*)buffer, msglen, 0, (const struct sockaddr *)&remoteaddr, remoteaddrlen);
-            }
+            res = sendto(serverfd, (char*)buffer, msglen, 0, (const struct sockaddr *)&clientaddr, clientaddrlen);
         }
     }
 
