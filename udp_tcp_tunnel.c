@@ -1,21 +1,17 @@
 #include "shared.c"
 
-int main(int argc, char* argv[])
+int udp_tcp_tunnel(int verbose, int obfuscate,
+                   struct sockaddr_in localaddr, int localport,
+                   struct sockaddr_in remoteaddr, int remoteport)
 {
-    int verbose = 0, obfuscate = 0, remotebound = 0, res;
+    int res, remotebound = 0;
     int serverfd, remotefd;
     struct pollfd fds[2];
     char buffer[MTU_SIZE + sizeof(unsigned short)];
-    struct hostent *localhost, *remotehost;
-    struct sockaddr_in localaddr, clientaddr, remoteaddr;
+    struct sockaddr_in clientaddr;
     int clientaddrlen = sizeof(clientaddr), remoteaddrlen = sizeof(remoteaddr);
-    int localport = 8080, remoteport = 0;
 
-    int ret = parse_arguments(argc, argv, &verbose, &obfuscate, localhost, remotehost, &localport, &remoteport, &localaddr, &clientaddr, &remoteaddr);
-    if (ret == EXIT_SUCCESS || ret == EXIT_FAILURE)
-    {
-        return ret;
-    }
+    memset(&clientaddr, 0, sizeof(clientaddr));
 
     if ((serverfd = socket(AF_INET, SOCK_DGRAM, 0)) < 0)
     { 
