@@ -11,14 +11,7 @@
 #include <netinet/tcp.h>
 #include <fcntl.h>
 
-#define LOCAL_ADDR "0.0.0.0"
-#define LOCAL_PORT 8080
-#define REMOTE_ADDR "rolisoft.go.ro"
-#define REMOTE_PORT 8080
-//#define REMOTE_ADDR "127.0.0.1"
-//#define REMOTE_PORT 8081
 #define MTU_SIZE 1500
-
 #define min(X, Y) (((X) < (Y)) ? (X) : (Y))
 
 static inline void obfuscate_message(char* message, int length)
@@ -85,54 +78,109 @@ static inline void write_14bit(unsigned short size, char* buffer, int* length)
     buffer[(*length)++] = value;
 }
 
-int main()
-{/*
-    unsigned short size = 163821;
-    
-    printf("%02hhx %02hhx\n", ((unsigned char*)&size)[0], ((unsigned char*)&size)[1]);
+void print_help(char* argv[])
+{
+    printf("usage: %s -r addr:port [args]\narguments:\n\n", argv[0]);
+    printf("   -r addr:port\tRemote host to tunnel packets to.\n");
+    printf("   -l addr:port\tLocal listening address and port.\n   \t\t  Optional. Default: 127.0.0.1:8080\n");
+    printf("   -o\t\tEnable generic header obfuscation.\n");
+    printf("   -v\t\tDetailed logging at the expense of decreased throughput.\n");
+    printf("   -h\t\tDisplays this message.\n");
+}
 
-    int cmplen = 0;
-    char cmpbuf[2];
-    unsigned short cmpval = size;
+int main(int argc, char* argv[])
+{
+	extern char *optarg;
+	extern int optind;
 
-    while (cmpval >= 0x80)
-    {
-        cmpbuf[cmplen++] = cmpval | 0x80;
-        cmpval >>= 7;
-    }
-
-    cmpbuf[cmplen++] = cmpval;
-
-    printf("encoded bytes are: %d %02hhx %02hhx %02hhx\n", cmplen, cmpbuf[0], cmpbuf[1], cmpbuf[2]);
-
-    unsigned short decmpval = 0;
-    int decshift = 0;
-    unsigned char deccurrent = 0;
-    int j = 0;
-    do
-    {
-        printf("looping\n");
-        if (decshift == 2 * 7) // cap at 16383
-        {
-            printf("Size header seems to be corrupted, abandoning read.\n");
-            //break;
-        }
-
-        deccurrent = cmpbuf[j++];
-        decmpval |= (deccurrent & 0x7f) << decshift;
-        decshift += 7;
-    }
-    while ((deccurrent & 0x80) != 0);
-
-    printf("decoded size is: %d\n", decmpval);
-
-    return 0;*/
-    int verbose = 0, obfuscate = 1, remotebound = 0, res;
+    int verbose = 0, obfuscate = 0, remotebound = 0, res;
     int serverfd, remotefd;
     struct pollfd fds[2];
+    char *token;
+    struct hostent *localhost, *remotehost;
     char buffer[MTU_SIZE + sizeof(unsigned short)];
     struct sockaddr_in localaddr, clientaddr, remoteaddr;
     int clientaddrlen = sizeof(clientaddr), remoteaddrlen = sizeof(remoteaddr);
+    int localport = 8080, remoteport = 0;
+
+    if (argc == 1)
+    {
+        print_help(argv);
+        return EXIT_SUCCESS;
+    }
+
+    int opt;
+    while((opt = getopt(argc, argv, "hl:r:ov")) != -1)
+    {
+        switch (opt)
+        {
+            case 'h':
+                print_help(argv);
+                return EXIT_SUCCESS;
+
+            case 'v':
+                verbose = 1;
+                break;
+            
+            case 'o':
+                obfuscate = 1;
+                break;
+            
+            case 'l':
+                token = strtok(optarg, ":");
+                localhost = gethostbyname(token);
+
+                if (localhost == NULL)
+                {
+                    perror("failed to resolve local host");
+                    return EXIT_FAILURE;
+                }
+
+                token = strtok(NULL, ":");
+                localport = strtoul(token, NULL, 0);
+
+                memset(&localaddr, 0, sizeof(localaddr));
+                memcpy(&localaddr.sin_addr, localhost->h_addr_list[0], localhost->h_length);
+                localaddr.sin_family = AF_INET;
+                localaddr.sin_port = htons(localport);
+                break;
+
+            case 'r':
+                token = strtok(optarg, ":");
+                remotehost = gethostbyname(token);
+
+                if (remotehost == NULL)
+                {
+                    perror("failed to resolve remote host");
+                    return EXIT_FAILURE;
+                }
+
+                token = strtok(NULL, ":");
+                remoteport = strtoul(token, NULL, 0);
+
+                memset(&remoteaddr, 0, sizeof(remoteaddr));
+                memcpy(&remoteaddr.sin_addr, remotehost->h_addr_list[0], remotehost->h_length);
+                remoteaddr.sin_family = AF_INET;
+                remoteaddr.sin_port = htons(remoteport);
+                break;
+        }
+    }
+
+    if (remotehost == NULL)
+    {
+        fprintf(stderr, "%s: you need to declare a remote host and port with -r\n", argv[0]);
+        return EXIT_FAILURE;
+    }
+
+    if (localhost == NULL)
+    {
+        memset(&localaddr, 0, sizeof(localaddr));
+        localaddr.sin_family = AF_INET;
+        localaddr.sin_port = htons(localport);
+        inet_pton(AF_INET, "127.0.0.1", &localaddr.sin_addr);
+    }
+
+    memset(&clientaddr, 0, sizeof(clientaddr));
 
     if ((serverfd = socket(AF_INET, SOCK_DGRAM, 0)) < 0)
     { 
@@ -145,26 +193,6 @@ int main()
         perror("gateway socket creation failed");
         return EXIT_FAILURE;
     }
-
-    memset(&localaddr, 0, sizeof(localaddr));
-    memset(&clientaddr, 0, sizeof(clientaddr));
-    memset(&remoteaddr, 0, sizeof(remoteaddr));
-
-    localaddr.sin_family = AF_INET;
-    localaddr.sin_port = htons(LOCAL_PORT);
-    inet_pton(AF_INET, LOCAL_ADDR, &localaddr.sin_addr);
-
-    struct hostent* remotehost = gethostbyname(REMOTE_ADDR);
-
-    if (remotehost == NULL)
-    {
-        perror("failed to resolve remote host");
-        return EXIT_FAILURE;
-    }
-
-    memcpy(&remoteaddr.sin_addr, remotehost->h_addr_list[0], remotehost->h_length);
-    remoteaddr.sin_family = AF_INET;
-    remoteaddr.sin_port = htons(REMOTE_PORT);
 
     if (bind(serverfd, (const struct sockaddr *)&localaddr, sizeof(localaddr)) < 0)
     {
