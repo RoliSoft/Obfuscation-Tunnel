@@ -5,6 +5,8 @@
 
 int main(int argc, char* argv[])
 {
+    signal(SIGINT, sig_handler);
+
     int mode = MODE_UDP_UDP, verbose = 0, obfuscate = 0, res;
     struct sockaddr_in localaddr, remoteaddr;
     int localport = 8080, remoteport = 0;

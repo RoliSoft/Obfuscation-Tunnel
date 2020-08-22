@@ -12,12 +12,33 @@
 #include <netinet/in.h>
 #include <netinet/tcp.h>
 #include <fcntl.h>
+#include <signal.h>
 
 #define MODE_UDP_UDP 0
 #define MODE_UDP_TCP 1
 #define MODE_TCP_UDP 2
 #define MTU_SIZE 1500
 #define min(X, Y) (((X) < (Y)) ? (X) : (Y))
+
+static volatile sig_atomic_t run = 1;
+static int sockets[10];
+
+static void sig_handler(int _)
+{
+    (void)_;
+
+    run = 0;
+    printf("Exiting...\n");
+
+    for (int i = 0; i < sizeof(sockets) / sizeof(int); i++)
+    {
+        if (sockets[i] != 0)
+        {
+            close(sockets[i]);
+            shutdown(sockets[i], SHUT_RDWR);
+        }
+    }
+}
 
 static inline void obfuscate_message(char* message, int length)
 {

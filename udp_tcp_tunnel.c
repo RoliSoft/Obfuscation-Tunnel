@@ -25,6 +25,9 @@ int udp_tcp_tunnel(int verbose, int obfuscate,
         return EXIT_FAILURE;
     }
 
+    sockets[0] = serverfd;
+    sockets[1] = remotefd;
+
     if (bind(serverfd, (const struct sockaddr *)&localaddr, sizeof(localaddr)) < 0)
     {
         perror("bind failed");
@@ -55,7 +58,7 @@ int udp_tcp_tunnel(int verbose, int obfuscate,
 
     if (obfuscate) printf("Header obfuscation enabled.\n");
 
-    while (1)
+    while (run)
     {
         if (verbose) printf("Polling...\n");
 
@@ -67,8 +70,15 @@ int udp_tcp_tunnel(int verbose, int obfuscate,
         }
         else if (res < 0)
         {
-            perror("poll failed");
-            return EXIT_FAILURE;
+            if (run)
+            {
+                perror("poll failed");
+                return EXIT_FAILURE;
+            }
+            else
+            {
+                return EXIT_SUCCESS;
+            }
         }
 
         if (fds[1].revents & POLLHUP || fds[1].revents & POLLERR)
@@ -82,6 +92,16 @@ int udp_tcp_tunnel(int verbose, int obfuscate,
             // udp -> tcp
 
             socklen_t msglen = recvfrom(serverfd, ((char*)buffer) + sizeof(unsigned short), MTU_SIZE, MSG_WAITALL, (struct sockaddr*)&clientaddr, (unsigned int*)&clientaddrlen);
+
+            if (msglen == -1)
+            {
+                if (run)
+                {
+                    perror("failed to read UDP packet");
+                }
+
+                continue;
+            }
 
             if (verbose) printf("Received %d bytes from client\n", msglen);
             if (obfuscate) obfuscate_message(((char*)buffer) + sizeof(unsigned short), msglen);
@@ -118,7 +138,7 @@ int udp_tcp_tunnel(int verbose, int obfuscate,
 
             unsigned short readsize = toread;
 
-            while (toread > 0)
+            while (toread > 0 && run)
             {
                 socklen_t msglen = read(remotefd, (char*)buffer + (readsize - toread), toread);
 
@@ -137,6 +157,7 @@ int udp_tcp_tunnel(int verbose, int obfuscate,
         }
     }
 
+    close(serverfd);
     close(remotefd);
 
     return 0;

@@ -25,6 +25,9 @@ int udp_udp_tunnel(int verbose, int obfuscate,
         return EXIT_FAILURE;
     }
 
+    sockets[0] = serverfd;
+    sockets[1] = remotefd;
+
     if (bind(serverfd, (const struct sockaddr *)&localaddr, sizeof(localaddr)) < 0)
     {
         perror("bind failed");
@@ -39,13 +42,23 @@ int udp_udp_tunnel(int verbose, int obfuscate,
 
     if (obfuscate) printf("Header obfuscation enabled.\n");
 
-    while (1)
+    while (run)
     {
         if (!remotebound)
         {
             if (verbose) printf("Waiting for first packet from client...\n");
 
             socklen_t msglen = recvfrom(serverfd, (char*)buffer, MTU_SIZE, MSG_WAITALL, (struct sockaddr*)&clientaddr, (unsigned int*)&clientaddrlen);
+
+            if (msglen == -1)
+            {
+                if (run)
+                {
+                    perror("failed to read UDP packet");
+                }
+
+                continue;
+            }
 
             char clientaddrstr[INET_ADDRSTRLEN];
             inet_ntop(AF_INET, &(clientaddr.sin_addr), clientaddrstr, INET_ADDRSTRLEN);
@@ -70,13 +83,30 @@ int udp_udp_tunnel(int verbose, int obfuscate,
         }
         else if (res < 0)
         {
-            perror("poll failed");
-            return EXIT_FAILURE;
+            if (run)
+            {
+                perror("poll failed");
+                return EXIT_FAILURE;
+            }
+            else
+            {
+                return EXIT_SUCCESS;
+            }
         }
 
         if (fds[0].revents & POLLIN)
         {
             socklen_t msglen = recvfrom(serverfd, (char*)buffer, MTU_SIZE, MSG_WAITALL, (struct sockaddr*)&clientaddr, (unsigned int*)&clientaddrlen);
+
+            if (msglen == -1)
+            {
+                if (run)
+                {
+                    perror("failed to read UDP packet");
+                }
+
+                continue;
+            }
 
             if (verbose) printf("Received %d bytes from client\n", msglen);
             if (obfuscate) obfuscate_message(buffer, msglen);
@@ -88,12 +118,25 @@ int udp_udp_tunnel(int verbose, int obfuscate,
         {
             socklen_t msglen = recvfrom(remotefd, (char*)buffer, MTU_SIZE, MSG_WAITALL, (struct sockaddr*)&remoteaddr, (unsigned int*)&remoteaddrlen);
 
+            if (msglen == -1)
+            {
+                if (run)
+                {
+                    perror("failed to read UDP packet");
+                }
+
+                continue;
+            }
+
             if (verbose) printf("Received %d bytes from remote\n", msglen);
             if (obfuscate) obfuscate_message(buffer, msglen);
 
             res = sendto(serverfd, (char*)buffer, msglen, 0, (const struct sockaddr *)&clientaddr, clientaddrlen);
         }
     }
+
+    close(serverfd);
+    close(remotefd);
 
     return 0;
 }
