@@ -17,7 +17,14 @@
 #define MODE_UDP_UDP 0
 #define MODE_UDP_TCP 1
 #define MODE_TCP_UDP 2
+#define MODE_UDP_ICMP 3
+#define MODE_ICMP_UDP 4
 #define MTU_SIZE 1500
+
+#define IPHDR_LEN 20
+#define ICMP_LEN 8
+#define ICMP_SKIP (IPHDR_LEN + ICMP_LEN)
+
 #define min(X, Y) (((X) < (Y)) ? (X) : (Y))
 
 static volatile sig_atomic_t run = 1;
@@ -104,6 +111,57 @@ static inline void write_14bit(unsigned short size, char* buffer, int* length)
     buffer[(*length)++] = value;
 }
 
+static inline unsigned short ip_checksum(char* data, unsigned int length)
+{
+    unsigned long long acc = 0xffff;
+
+    unsigned int offset = ((unsigned long)data)&3;
+    if (offset)
+    {
+        unsigned int count = 4-offset;
+        if (count > length)
+        {
+            count = length;
+        }
+
+        unsigned int word = 0;
+        memcpy(offset + (char*)&word, data, count);
+        acc += ntohl(word);
+        data += count;
+        length -= count;
+    }
+
+    char* data_end = data+(length&~3);
+    while (data != data_end)
+    {
+        unsigned int word;
+        memcpy(&word, data, 4);
+        acc += ntohl(word);
+        data += 4;
+    }
+    length &= 3;
+
+    if (length)
+    {
+        unsigned int word = 0;
+        memcpy(&word, data, length);
+        acc += ntohl(word);
+    }
+
+    acc = (acc&0xffffffff)+(acc>>32);
+    while (acc >> 16)
+    {
+        acc = (acc&0xffff)+(acc>>16);
+    }
+
+    if (offset & 1)
+    {
+        acc = ((acc&0xff00)>>8)|((acc&0x00ff)<<8);
+    }
+
+    return htons(~acc);
+}
+
 void print_help(char* argv[])
 {
     printf("usage: %s -r addr:port [args]\narguments:\n\n", argv[0]);
@@ -151,6 +209,14 @@ int parse_arguments(int argc, char* argv[],
                 {
                     *mode = MODE_TCP_UDP;
                 }
+                else if (strcmp(optarg, "ui") == 0)
+                {
+                    *mode = MODE_UDP_ICMP;
+                }
+                else if (strcmp(optarg, "iu") == 0)
+                {
+                    *mode = MODE_ICMP_UDP;
+                }
                 else
                 {
                     fprintf(stderr, "unrecognized operating mode\n");
@@ -177,7 +243,14 @@ int parse_arguments(int argc, char* argv[],
                 }
 
                 token = strtok(NULL, ":");
-                *localport = strtoul(token, NULL, 0);
+                if (token != NULL)
+                {
+                    *localport = strtoul(token, NULL, 0);
+                }
+                else
+                {
+                    *localport = 0;
+                }
 
                 memset(localaddr, 0, sizeof(*localaddr));
                 memcpy(&(localaddr->sin_addr), localhost->h_addr_list[0], localhost->h_length);
@@ -196,7 +269,14 @@ int parse_arguments(int argc, char* argv[],
                 }
 
                 token = strtok(NULL, ":");
-                *remoteport = strtoul(token, NULL, 0);
+                if (token != NULL)
+                {
+                    *remoteport = strtoul(token, NULL, 0);
+                }
+                else
+                {
+                    *remoteport = 0;
+                }
 
                 memset(remoteaddr, 0, sizeof(*remoteaddr));
                 memcpy(&(remoteaddr->sin_addr), remotehost->h_addr_list[0], remotehost->h_length);

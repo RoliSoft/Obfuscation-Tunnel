@@ -2,6 +2,8 @@
 #include "udp_udp_tunnel.c"
 #include "udp_tcp_tunnel.c"
 #include "tcp_udp_tunnel.c"
+#include "udp_icmp_tunnel.c"
+#include "icmp_udp_tunnel.c"
 
 int main(int argc, char* argv[])
 {
@@ -28,5 +30,11 @@ int main(int argc, char* argv[])
 
         case MODE_TCP_UDP:
             return tcp_udp_tunnel(verbose, obfuscate, localaddr, localport, remoteaddr, remoteport);
+
+        case MODE_UDP_ICMP:
+            return udp_icmp_tunnel(verbose, obfuscate, localaddr, localport, remoteaddr, remoteport);
+
+        case MODE_ICMP_UDP:
+            return icmp_udp_tunnel(verbose, obfuscate, localaddr, localport, remoteaddr, remoteport);
     }
 }
