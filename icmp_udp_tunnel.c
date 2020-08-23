@@ -1,28 +1,6 @@
 #include "shared.c"
-#include <pcap.h>
 
-struct icmp_udp_session
-{
-    int verbose;
-    int obfuscate;
-    int pcap;
-    struct sockaddr_in localaddr;
-    int localport;
-    struct sockaddr_in remoteaddr;
-    int remoteport;
-    struct sockaddr_in clientaddr;
-    int clientaddrlen;
-    int remoteaddrlen;
-    int serverfd;
-    int remotefd;
-    int remotebound;
-    unsigned short sequence;
-    char *capdev;
-    pcap_t *capptr;
-    struct pcap_pkthdr capdata;
-};
-
-void icmp_udp_server_to_remote_loop(struct icmp_udp_session *s)
+void icmp_udp_server_to_remote_loop(struct session *s)
 {
     int res;
     char buffer[MTU_SIZE];
@@ -81,7 +59,7 @@ void icmp_udp_server_to_remote_loop(struct icmp_udp_session *s)
     }
 }
 
-void icmp_udp_server_to_remote_pcap_loop(struct icmp_udp_session *s)
+void icmp_udp_server_to_remote_pcap_loop(struct session *s)
 {
     int res;
     const u_char *capbuffer;
@@ -141,7 +119,7 @@ void icmp_udp_server_to_remote_pcap_loop(struct icmp_udp_session *s)
     }
 }
 
-void icmp_udp_remote_to_server_loop(struct icmp_udp_session *s)
+void icmp_udp_remote_to_server_loop(struct session *s)
 {
     int res;
     char buffer[MTU_SIZE];
@@ -179,36 +157,21 @@ void icmp_udp_remote_to_server_loop(struct icmp_udp_session *s)
     }
 }
 
-int icmp_udp_tunnel(int verbose, int obfuscate, int pcap,
-                   struct sockaddr_in localaddr, int localport,
-                   struct sockaddr_in remoteaddr, int remoteport)
+int icmp_udp_tunnel(struct session *s)
 {
-    struct icmp_udp_session s;
-    memset(&s, 0, sizeof(s));
-
-    s.verbose = verbose;
-    s.obfuscate = obfuscate;
-    s.pcap = pcap;
-    s.localaddr = localaddr;
-    s.localport = localport;
-    s.remoteaddr = remoteaddr;
-    s.remoteport = remoteport;
-    s.clientaddrlen = sizeof(s.clientaddr);
-    s.remoteaddrlen = sizeof(s.remoteaddr);
-
-    if ((s.serverfd = socket(AF_INET, SOCK_RAW, IPPROTO_ICMP)) < 0)
+    if ((s->serverfd = socket(AF_INET, SOCK_RAW, IPPROTO_ICMP)) < 0)
     { 
         perror("server socket creation failed");
         return EXIT_FAILURE;
     }
 
-    if ((s.remotefd = socket(AF_INET, SOCK_DGRAM, 0)) < 0)
+    if ((s->remotefd = socket(AF_INET, SOCK_DGRAM, 0)) < 0)
     { 
         perror("gateway socket creation failed");
         return EXIT_FAILURE;
     }
 
-    if (pcap)
+    if (s->pcap)
     {
         pcap_if_t *capdevs;
         char caperr[PCAP_ERRBUF_SIZE];
@@ -220,50 +183,50 @@ int icmp_udp_tunnel(int verbose, int obfuscate, int pcap,
             return EXIT_FAILURE;
         }
 
-        s.capdev = capdevs->name;
-        s.capptr = pcap_open_live(s.capdev, MTU_SIZE, 1, 1, caperr);
-        if (s.capptr == NULL)
+        s->capdev = capdevs->name;
+        s->capptr = pcap_open_live(s->capdev, MTU_SIZE, 1, 1, caperr);
+        if (s->capptr == NULL)
         {
-            fprintf(stderr, "Can't open pcap device %s: %s\n", s.capdev, caperr);
+            fprintf(stderr, "Can't open pcap device %s: %s\n", s->capdev, caperr);
             return EXIT_FAILURE;
         }
 
-        printf("Device selected for packet capture: %s\n", s.capdev);
+        printf("Device selected for packet capture: %s\n", s->capdev);
 
         char bpf_filter[] = "icmp[icmptype] == icmp-echo and icmp[4] == 0x13 and icmp[5] = 0x37";
         struct bpf_program fp;
 
         bpf_u_int32 net;
-        if (pcap_compile(s.capptr, &fp, bpf_filter, 0, net) == -1)
+        if (pcap_compile(s->capptr, &fp, bpf_filter, 0, net) == -1)
         {
-            fprintf(stderr, "Can't parse filter %s: %s\n", bpf_filter, pcap_geterr(s.capptr));
+            fprintf(stderr, "Can't parse filter %s: %s\n", bpf_filter, pcap_geterr(s->capptr));
             return EXIT_FAILURE;
         }
 
-        if (pcap_setfilter(s.capptr, &fp) == -1)
+        if (pcap_setfilter(s->capptr, &fp) == -1)
         {
-            fprintf(stderr, "Can't install filter %s: %s\n", bpf_filter, pcap_geterr(s.capptr));
+            fprintf(stderr, "Can't install filter %s: %s\n", bpf_filter, pcap_geterr(s->capptr));
             return EXIT_FAILURE;
         }
     }
 
-    sockets[0] = s.serverfd;
-    sockets[1] = s.remotefd;
+    sockets[0] = s->serverfd;
+    sockets[1] = s->remotefd;
 
-    if (obfuscate) printf("Header obfuscation enabled.\n");
+    if (s->obfuscate) printf("Header obfuscation enabled.\n");
 
     pthread_t threads[2];
 
-    if (s.pcap)
+    if (s->pcap)
     {
-        pthread_create(&threads[1], NULL, (void*(*)(void*))&icmp_udp_server_to_remote_pcap_loop, (void*)&s);
+        pthread_create(&threads[1], NULL, (void*(*)(void*))&icmp_udp_server_to_remote_pcap_loop, (void*)s);
     }
     else
     {
-        pthread_create(&threads[1], NULL, (void*(*)(void*))&icmp_udp_server_to_remote_loop, (void*)&s);
+        pthread_create(&threads[1], NULL, (void*(*)(void*))&icmp_udp_server_to_remote_loop, (void*)s);
     }
 
-    pthread_create(&threads[0], NULL, (void*(*)(void*))&icmp_udp_remote_to_server_loop, (void*)&s);
+    pthread_create(&threads[0], NULL, (void*(*)(void*))&icmp_udp_remote_to_server_loop, (void*)s);
 
     for (int i = 0; i < sizeof(threads) / sizeof(threads[0]); i++)
     {
@@ -272,8 +235,8 @@ int icmp_udp_tunnel(int verbose, int obfuscate, int pcap,
 
     pthread_exit(NULL);
 
-    close(s.serverfd);
-    close(s.remotefd);
+    close(s->serverfd);
+    close(s->remotefd);
 
     return 0;
 }

@@ -1,22 +1,6 @@
 #include "shared.c"
 
-struct udp_udp_session
-{
-    int verbose;
-    int obfuscate;
-    struct sockaddr_in localaddr;
-    int localport;
-    struct sockaddr_in remoteaddr;
-    int remoteport;
-    struct sockaddr_in clientaddr;
-    int clientaddrlen;
-    int remoteaddrlen;
-    int serverfd;
-    int remotefd;
-    int remotebound;
-};
-
-void udp_udp_server_to_remote_loop(struct udp_udp_session *s)
+void udp_udp_server_to_remote_loop(struct session *s)
 {
     int res;
     char buffer[MTU_SIZE];
@@ -71,7 +55,7 @@ void udp_udp_server_to_remote_loop(struct udp_udp_session *s)
     }
 }
 
-void udp_udp_remote_to_server_loop(struct udp_udp_session *s)
+void udp_udp_remote_to_server_loop(struct session *s)
 {
     int res;
     char buffer[MTU_SIZE];
@@ -103,51 +87,37 @@ void udp_udp_remote_to_server_loop(struct udp_udp_session *s)
     }
 }
 
-int udp_udp_tunnel(int verbose, int obfuscate,
-                   struct sockaddr_in localaddr, int localport,
-                   struct sockaddr_in remoteaddr, int remoteport)
+int udp_udp_tunnel(struct session *s)
 {
-    struct udp_udp_session s;
-    memset(&s, 0, sizeof(s));
-
-    s.verbose = verbose;
-    s.obfuscate = obfuscate;
-    s.localaddr = localaddr;
-    s.localport = localport;
-    s.remoteaddr = remoteaddr;
-    s.remoteport = remoteport;
-    s.clientaddrlen = sizeof(s.clientaddr);
-    s.remoteaddrlen = sizeof(s.remoteaddr);
-
-    if ((s.serverfd = socket(AF_INET, SOCK_DGRAM, 0)) < 0)
+    if ((s->serverfd = socket(AF_INET, SOCK_DGRAM, 0)) < 0)
     { 
         perror("server socket creation failed");
         return EXIT_FAILURE;
     }
 
-    if ((s.remotefd = socket(AF_INET, SOCK_DGRAM, 0)) < 0)
+    if ((s->remotefd = socket(AF_INET, SOCK_DGRAM, 0)) < 0)
     { 
         perror("gateway socket creation failed");
         return EXIT_FAILURE;
     }
 
-    sockets[0] = s.serverfd;
-    sockets[1] = s.remotefd;
+    sockets[0] = s->serverfd;
+    sockets[1] = s->remotefd;
 
-    if (bind(s.serverfd, (const struct sockaddr *)&s.localaddr, sizeof(s.localaddr)) < 0)
+    if (bind(s->serverfd, (const struct sockaddr *)&s->localaddr, sizeof(s->localaddr)) < 0)
     {
         perror("bind failed");
         return EXIT_FAILURE;
     }
 
-    if (obfuscate) printf("Header obfuscation enabled.\n");
+    if (s->obfuscate) printf("Header obfuscation enabled.\n");
 
-    if (verbose) printf("Spawning threads...\n");
+    if (s->verbose) printf("Spawning threads...\n");
 
     pthread_t threads[2];
 
-    pthread_create(&threads[0], NULL, (void*(*)(void*))&udp_udp_server_to_remote_loop, (void*)&s);
-    pthread_create(&threads[1], NULL, (void*(*)(void*))&udp_udp_remote_to_server_loop, (void*)&s);
+    pthread_create(&threads[0], NULL, (void*(*)(void*))&udp_udp_server_to_remote_loop, (void*)s);
+    pthread_create(&threads[1], NULL, (void*(*)(void*))&udp_udp_remote_to_server_loop, (void*)s);
 
     for (int i = 0; i < sizeof(threads) / sizeof(threads[0]); i++)
     {
@@ -156,8 +126,8 @@ int udp_udp_tunnel(int verbose, int obfuscate,
 
     pthread_exit(NULL);
 
-    close(s.serverfd);
-    close(s.remotefd);
+    close(s->serverfd);
+    close(s->remotefd);
 
     return 0;
 }

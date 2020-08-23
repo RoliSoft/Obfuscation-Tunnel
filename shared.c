@@ -15,6 +15,7 @@
 #include <signal.h>
 #include <pthread.h>
 #include <errno.h>
+#include <pcap/pcap.h>
 
 #define MODE_UDP_UDP 0
 #define MODE_UDP_TCP 1
@@ -35,6 +36,28 @@
 
 static volatile sig_atomic_t run = 1;
 static int sockets[10];
+
+struct session
+{
+    int mode;
+    int verbose;
+    int obfuscate;
+    int pcap;
+    struct sockaddr_in localaddr;
+    int localport;
+    struct sockaddr_in remoteaddr;
+    int remoteport;
+    struct sockaddr_in clientaddr;
+    int clientaddrlen;
+    int remoteaddrlen;
+    int serverfd;
+    int remotefd;
+    int clientfd;
+    int remotebound;
+    unsigned short sequence;
+    char *capdev;
+    pcap_t *capptr;
+};
 
 static void sig_handler(int _)
 {
@@ -227,10 +250,7 @@ void print_help(char* argv[])
     printf("   -h\t\tDisplays this message.\n");
 }
 
-int parse_arguments(int argc, char* argv[],
-                    int *mode, int *verbose, int *obfuscate, int *pcap,
-                    struct sockaddr_in *localaddr, int *localport,
-                    struct sockaddr_in *remoteaddr, int *remoteport)
+int parse_arguments(int argc, char* argv[], struct session *s)
 {
     char *token;
     struct hostent *localhost = NULL, *remotehost = NULL;
@@ -240,6 +260,9 @@ int parse_arguments(int argc, char* argv[],
         print_help(argv);
         return EXIT_SUCCESS;
     }
+
+    memset(s, 0, sizeof(*s));
+    s->localport = 8080;
 
     int opt;
     while((opt = getopt(argc, argv, "hm:l:r:opv")) != -1)
@@ -253,23 +276,23 @@ int parse_arguments(int argc, char* argv[],
             case 'm':
                 if (strcmp(optarg, "uu") == 0)
                 {
-                    *mode = MODE_UDP_UDP;
+                    s->mode = MODE_UDP_UDP;
                 }
                 else if (strcmp(optarg, "ut") == 0)
                 {
-                    *mode = MODE_UDP_TCP;
+                    s->mode = MODE_UDP_TCP;
                 }
                 else if (strcmp(optarg, "tu") == 0)
                 {
-                    *mode = MODE_TCP_UDP;
+                    s->mode = MODE_TCP_UDP;
                 }
                 else if (strcmp(optarg, "ui") == 0)
                 {
-                    *mode = MODE_UDP_ICMP;
+                    s->mode = MODE_UDP_ICMP;
                 }
                 else if (strcmp(optarg, "iu") == 0)
                 {
-                    *mode = MODE_ICMP_UDP;
+                    s->mode = MODE_ICMP_UDP;
                 }
                 else
                 {
@@ -279,15 +302,15 @@ int parse_arguments(int argc, char* argv[],
                 break;
 
             case 'v':
-                *verbose = 1;
+                s->verbose = 1;
                 break;
             
             case 'o':
-                *obfuscate = 1;
+                s->obfuscate = 1;
                 break;
             
             case 'p':
-                *pcap = 1;
+                s->pcap = 1;
                 break;
             
             case 'l':
@@ -303,17 +326,17 @@ int parse_arguments(int argc, char* argv[],
                 token = strtok(NULL, ":");
                 if (token != NULL)
                 {
-                    *localport = strtoul(token, NULL, 0);
+                    s->localport = strtoul(token, NULL, 0);
                 }
                 else
                 {
-                    *localport = 0;
+                    s->localport = 0;
                 }
 
-                memset(localaddr, 0, sizeof(*localaddr));
-                memcpy(&(localaddr->sin_addr), localhost->h_addr_list[0], localhost->h_length);
-                localaddr->sin_family = AF_INET;
-                localaddr->sin_port = htons(*localport);
+                memset(&s->localaddr, 0, sizeof(s->localaddr));
+                memcpy(&(s->localaddr.sin_addr), localhost->h_addr_list[0], localhost->h_length);
+                s->localaddr.sin_family = AF_INET;
+                s->localaddr.sin_port = htons(s->localport);
                 break;
 
             case 'r':
@@ -329,17 +352,17 @@ int parse_arguments(int argc, char* argv[],
                 token = strtok(NULL, ":");
                 if (token != NULL)
                 {
-                    *remoteport = strtoul(token, NULL, 0);
+                    s->remoteport = strtoul(token, NULL, 0);
                 }
                 else
                 {
-                    *remoteport = 0;
+                    s->remoteport = 0;
                 }
 
-                memset(remoteaddr, 0, sizeof(*remoteaddr));
-                memcpy(&(remoteaddr->sin_addr), remotehost->h_addr_list[0], remotehost->h_length);
-                remoteaddr->sin_family = AF_INET;
-                remoteaddr->sin_port = htons(*remoteport);
+                memset(&s->remoteaddr, 0, sizeof(s->remoteaddr));
+                memcpy(&(s->remoteaddr.sin_addr), remotehost->h_addr_list[0], remotehost->h_length);
+                s->remoteaddr.sin_family = AF_INET;
+                s->remoteaddr.sin_port = htons(s->remoteport);
                 break;
         }
     }
@@ -352,11 +375,14 @@ int parse_arguments(int argc, char* argv[],
 
     if (localhost == NULL)
     {
-        memset(localaddr, 0, sizeof(*localaddr));
-        localaddr->sin_family = AF_INET;
-        localaddr->sin_port = htons(*localport);
-        inet_pton(AF_INET, "127.0.0.1", &(localaddr->sin_addr));
+        memset(&s->localaddr, 0, sizeof(s->localaddr));
+        s->localaddr.sin_family = AF_INET;
+        s->localaddr.sin_port = htons(s->localport);
+        inet_pton(AF_INET, "127.0.0.1", &(s->localaddr.sin_addr));
     }
+
+    s->clientaddrlen = sizeof(s->clientaddr);
+    s->remoteaddrlen = sizeof(s->remoteaddr);
 
     return -1;
 }

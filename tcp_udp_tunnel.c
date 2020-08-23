@@ -1,23 +1,6 @@
 #include "shared.c"
 
-struct tcp_udp_session
-{
-    int verbose;
-    int obfuscate;
-    struct sockaddr_in localaddr;
-    int localport;
-    struct sockaddr_in remoteaddr;
-    int remoteport;
-    struct sockaddr_in clientaddr;
-    int clientaddrlen;
-    int remoteaddrlen;
-    int serverfd;
-    int remotefd;
-    int clientfd;
-    int remotebound;
-};
-
-int tcp_udp_client_to_remote_loop(struct tcp_udp_session *s)
+int tcp_udp_client_to_remote_loop(struct session *s)
 {
     int res;
     char buffer[MTU_SIZE];
@@ -63,7 +46,7 @@ int tcp_udp_client_to_remote_loop(struct tcp_udp_session *s)
     return EXIT_SUCCESS;
 }
 
-int tcp_udp_remote_to_client_loop(struct tcp_udp_session *s)
+int tcp_udp_remote_to_client_loop(struct session *s)
 {
     int res;
     char buffer[MTU_SIZE];
@@ -102,44 +85,30 @@ int tcp_udp_remote_to_client_loop(struct tcp_udp_session *s)
     return EXIT_SUCCESS;
 }
 
-int tcp_udp_tunnel(int verbose, int obfuscate,
-                   struct sockaddr_in localaddr, int localport,
-                   struct sockaddr_in remoteaddr, int remoteport)
+int tcp_udp_tunnel(struct session *s)
 {
-    struct tcp_udp_session s;
-    memset(&s, 0, sizeof(s));
-
-    s.verbose = verbose;
-    s.obfuscate = obfuscate;
-    s.localaddr = localaddr;
-    s.localport = localport;
-    s.remoteaddr = remoteaddr;
-    s.remoteport = remoteport;
-    s.clientaddrlen = sizeof(s.clientaddr);
-    s.remoteaddrlen = sizeof(s.remoteaddr);
-
-    if ((s.serverfd = socket(AF_INET, SOCK_STREAM, 0)) < 0)
+    if ((s->serverfd = socket(AF_INET, SOCK_STREAM, 0)) < 0)
     { 
         perror("server socket creation failed");
         return EXIT_FAILURE;
     }
 
-    if ((s.remotefd = socket(AF_INET, SOCK_DGRAM, 0)) < 0)
+    if ((s->remotefd = socket(AF_INET, SOCK_DGRAM, 0)) < 0)
     { 
         perror("gateway socket creation failed");
         return EXIT_FAILURE;
     }
 
-    sockets[0] = s.serverfd;
-    sockets[1] = s.remotefd;
+    sockets[0] = s->serverfd;
+    sockets[1] = s->remotefd;
 
-    if (bind(s.serverfd, (const struct sockaddr *)&s.localaddr, sizeof(s.localaddr)) < 0)
+    if (bind(s->serverfd, (const struct sockaddr *)&s->localaddr, sizeof(s->localaddr)) < 0)
     {
         perror("bind failed");
         return EXIT_FAILURE;
     }
 
-    if (listen(s.serverfd, 1) != 0)
+    if (listen(s->serverfd, 1) != 0)
     {
         perror("failed to listen on local port");
         return EXIT_FAILURE;
@@ -147,9 +116,9 @@ int tcp_udp_tunnel(int verbose, int obfuscate,
 
     printf("Waiting for first client...\n");
 
-    s.clientfd = accept(s.serverfd, (struct sockaddr*)&s.clientaddr, (unsigned int*)&s.clientaddrlen);
+    s->clientfd = accept(s->serverfd, (struct sockaddr*)&s->clientaddr, (unsigned int*)&s->clientaddrlen);
 
-    if (s.clientfd < 0)
+    if (s->clientfd < 0)
     {
         if (run)
         {
@@ -162,26 +131,26 @@ int tcp_udp_tunnel(int verbose, int obfuscate,
         }
     }
 
-    sockets[2] = s.clientfd;
+    sockets[2] = s->clientfd;
 
     char clientaddrstr[INET_ADDRSTRLEN];
-    inet_ntop(AF_INET, &(s.clientaddr.sin_addr), clientaddrstr, INET_ADDRSTRLEN);
-    printf("Client connected from %s:%d\n", clientaddrstr, ntohs(s.clientaddr.sin_port));
+    inet_ntop(AF_INET, &(s->clientaddr.sin_addr), clientaddrstr, INET_ADDRSTRLEN);
+    printf("Client connected from %s:%d\n", clientaddrstr, ntohs(s->clientaddr.sin_port));
 
     int i = 1;
-    setsockopt(s.clientfd, IPPROTO_TCP, TCP_NODELAY, (void *)&i, sizeof(i));
+    setsockopt(s->clientfd, IPPROTO_TCP, TCP_NODELAY, (void *)&i, sizeof(i));
 #ifdef TCP_QUICKACK
-    setsockopt(s.clientfd, IPPROTO_TCP, TCP_QUICKACK, (void *)&i, sizeof(i));
+    setsockopt(s->clientfd, IPPROTO_TCP, TCP_QUICKACK, (void *)&i, sizeof(i));
 #endif
 
-    //fcntl(s.clientfd, F_SETFL, O_NONBLOCK);
+    //fcntl(s->clientfd, F_SETFL, O_NONBLOCK);
 
-    if (obfuscate) printf("Header obfuscation enabled.\n");
+    if (s->obfuscate) printf("Header obfuscation enabled.\n");
 
     pthread_t threads[2];
 
-    pthread_create(&threads[0], NULL, (void*(*)(void*))&tcp_udp_client_to_remote_loop, (void*)&s);
-    pthread_create(&threads[1], NULL, (void*(*)(void*))&tcp_udp_remote_to_client_loop, (void*)&s);
+    pthread_create(&threads[0], NULL, (void*(*)(void*))&tcp_udp_client_to_remote_loop, (void*)s);
+    pthread_create(&threads[1], NULL, (void*(*)(void*))&tcp_udp_remote_to_client_loop, (void*)s);
 
     for (int i = 0; i < sizeof(threads) / sizeof(threads[0]); i++)
     {
@@ -190,9 +159,9 @@ int tcp_udp_tunnel(int verbose, int obfuscate,
 
     pthread_exit(NULL);
 
-    close(s.clientfd);
-    close(s.serverfd);
-    close(s.remotefd);
+    close(s->clientfd);
+    close(s->serverfd);
+    close(s->remotefd);
 
     return 0;
 }

@@ -9,32 +9,30 @@ int main(int argc, char* argv[])
 {
     signal(SIGINT, sig_handler);
 
-    int mode = MODE_UDP_UDP, verbose = 0, obfuscate = 0, pcap = 0, res;
-    struct sockaddr_in localaddr, remoteaddr;
-    int localport = 8080, remoteport = 0;
+    struct session s;
 
-    int ret = parse_arguments(argc, argv, &mode, &verbose, &obfuscate, &pcap, &localaddr, &localport, &remoteaddr, &remoteport);
+    int ret = parse_arguments(argc, argv, &s);
     if (ret == EXIT_SUCCESS || ret == EXIT_FAILURE)
     {
         return ret;
     }
 
-    switch (mode)
+    switch (s.mode)
     {
         default:
         case MODE_UDP_UDP:
-            return udp_udp_tunnel(verbose, obfuscate, localaddr, localport, remoteaddr, remoteport);
+            return udp_udp_tunnel(&s);
 
         case MODE_UDP_TCP:
-            return udp_tcp_tunnel(verbose, obfuscate, localaddr, localport, remoteaddr, remoteport);
+            return udp_tcp_tunnel(&s);
 
         case MODE_TCP_UDP:
-            return tcp_udp_tunnel(verbose, obfuscate, localaddr, localport, remoteaddr, remoteport);
+            return tcp_udp_tunnel(&s);
 
         case MODE_UDP_ICMP:
-            return udp_icmp_tunnel(verbose, obfuscate, pcap, localaddr, localport, remoteaddr, remoteport);
+            return udp_icmp_tunnel(&s);
 
         case MODE_ICMP_UDP:
-            return icmp_udp_tunnel(verbose, obfuscate, pcap, localaddr, localport, remoteaddr, remoteport);
+            return icmp_udp_tunnel(&s);
     }
 }
