@@ -23,7 +23,9 @@
 
 #define ETHHDR_LEN 14
 #define IPHDR_LEN 20
+#define IPHDR_SRC_OFFSET 12
 #define ICMP_LEN 8
+#define ICMP_SEQ_OFFSET 6
 #define ICMP_SKIP (IPHDR_LEN + ICMP_LEN)
 #define PCAP_ICMP_SKIP (ETHHDR_LEN + IPHDR_LEN + ICMP_LEN)
 
@@ -204,7 +206,7 @@ void hexdump(const void* data, size_t size)
                 {
 					printf("   ");
 				}
-                
+
 				printf("|  %s \n", ascii);
 			}
 		}
@@ -217,7 +219,7 @@ void print_help(char* argv[])
     printf("   -r addr:port\tRemote host to tunnel packets to.\n");
     printf("   -l addr:port\tLocal listening address and port.\n   \t\t  Optional, defaults to 127.0.0.1:8080\n");
     printf("   -m mode\tOperation mode. Possible values:\n   \t\t  uu - UDP-to-UDP (Default)\n   \t\t  ut - UDP-to-TCP\n   \t\t  tu - TCP-to-UDP\n   \t\t  ui - UDP-to-ICMP (Requires root)   \t\t  tu - ICMP-to-UDP (Requires root)\n\n");
-    printf("   -p\t\tUse PCAP, only applicable to UDP-to-ICMP, highly recommended.\n");
+    printf("   -p\t\tUse PCAP, only applicable to ICMP tunnels, highly recommended.\n");
     printf("   -o\t\tEnable generic header obfuscation.\n");
     printf("   -v\t\tDetailed logging at the expense of decreased throughput.\n");
     printf("   -h\t\tDisplays this message.\n");

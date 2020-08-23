@@ -35,6 +35,6 @@ int main(int argc, char* argv[])
             return udp_icmp_tunnel(verbose, obfuscate, pcap, localaddr, localport, remoteaddr, remoteport);
 
         case MODE_ICMP_UDP:
-            return icmp_udp_tunnel(verbose, obfuscate, localaddr, localport, remoteaddr, remoteport);
+            return icmp_udp_tunnel(verbose, obfuscate, pcap, localaddr, localport, remoteaddr, remoteport);
     }
 }

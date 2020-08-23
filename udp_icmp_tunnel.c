@@ -38,9 +38,10 @@ int udp_icmp_tunnel(int verbose, int obfuscate, int pcap,
         char caperr[PCAP_ERRBUF_SIZE];
 
         pcap_findalldevs(&capdevs, caperr);
-        if (capdev == NULL) {
+        if (capdevs == NULL)
+        {
             printf("Error finding devices: %s\n", caperr);
-            return 1;
+            return EXIT_FAILURE;
         }
 
         capdev = capdevs->name;
@@ -48,7 +49,7 @@ int udp_icmp_tunnel(int verbose, int obfuscate, int pcap,
         if (capptr == NULL)
         {
             fprintf(stderr, "Can't open pcap device %s: %s\n", capdev, caperr);
-            return(2);
+            return EXIT_FAILURE;
         }
 
         printf("Device selected for packet capture: %s\n", capdev);
