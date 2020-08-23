@@ -1,17 +1,23 @@
 #include "shared.c"
+#include <pcap.h>
 
-int udp_icmp_tunnel(int verbose, int obfuscate,
+int udp_icmp_tunnel(int verbose, int obfuscate, int pcap,
                    struct sockaddr_in localaddr, int localport,
                    struct sockaddr_in remoteaddr, int remoteport)
 {
     int res, remotebound = 0;
     int serverfd, remotefd;
-    struct pollfd fds[2];
+    struct pollfd fds[3];
     char buffer[MTU_SIZE];
     struct sockaddr_in clientaddr;
     int clientaddrlen = sizeof(clientaddr), remoteaddrlen = sizeof(remoteaddr);
     unsigned short sequence = 0;
-    
+
+    char *capdev;
+    pcap_t *capptr;
+    const u_char *capbuffer;
+    struct pcap_pkthdr capdata;
+
     memset(&clientaddr, 0, sizeof(clientaddr));
 
     if ((serverfd = socket(AF_INET, SOCK_DGRAM, 0)) < 0)
@@ -26,6 +32,41 @@ int udp_icmp_tunnel(int verbose, int obfuscate,
         return EXIT_FAILURE;
     }
 
+    if (pcap)
+    {
+        char caperr[PCAP_ERRBUF_SIZE];
+        capdev = pcap_lookupdev(caperr);
+        if (capdev == NULL) {
+            printf("Error finding device: %s\n", caperr);
+            return 1;
+        }
+
+        capptr = pcap_open_live(capdev, MTU_SIZE, 1, 1, caperr);
+        if (capptr == NULL)
+        {
+            fprintf(stderr, "Can't open pcap device %s: %s\n", capdev, caperr);
+            return(2);
+        }
+
+        printf("Device selected for packet capture: %s\n", capdev);
+
+        char bpf_filter[] = "icmp[icmptype] == icmp-echoreply and icmp[4] == 0x13 and icmp[5] = 0x37";
+        struct bpf_program fp;
+
+        bpf_u_int32 net;
+        if (pcap_compile(capptr, &fp, bpf_filter, 0, net) == -1)
+        {
+            fprintf(stderr, "Can't parse filter %s: %s\n", bpf_filter, pcap_geterr(capptr));
+            return EXIT_FAILURE;
+        }
+
+        if (pcap_setfilter(capptr, &fp) == -1)
+        {
+            fprintf(stderr, "Can't install filter %s: %s\n", bpf_filter, pcap_geterr(capptr));
+            return EXIT_FAILURE;
+        }
+    }
+
     sockets[0] = serverfd;
     sockets[1] = remotefd;
 
@@ -38,8 +79,17 @@ int udp_icmp_tunnel(int verbose, int obfuscate,
     memset(fds, 0 , sizeof(fds));
     fds[0].fd = serverfd;
     fds[0].events = POLLIN;
-    fds[1].fd = remotefd;
-    fds[1].events = POLLIN;
+
+    if (pcap)
+    {
+        fds[1].fd = pcap_get_selectable_fd(capptr);
+        fds[1].events = POLLIN;
+    }
+    else
+    {
+        fds[1].fd = remotefd;
+        fds[1].events = POLLIN;
+    }
 
     if (obfuscate) printf("Header obfuscation enabled.\n");
 
@@ -129,22 +179,44 @@ int udp_icmp_tunnel(int verbose, int obfuscate,
 
         if (fds[1].revents & POLLIN)
         {
-            socklen_t msglen = recvfrom(remotefd, (char*)buffer, MTU_SIZE, 0, (struct sockaddr*)&remoteaddr, (unsigned int*)&remoteaddrlen);
-
-            if (msglen == -1)
+            if (pcap)
             {
-                if (run)
+                capbuffer = pcap_next(capptr, &capdata);
+
+                if (capbuffer == NULL)
                 {
-                    perror("failed to read ICMP packet");
+                    if (run)
+                    {
+                        perror("failed to read ICMP packet");
+                    }
+
+                    continue;
+                }
+                
+                if (verbose) printf("Received %d bytes from remote\n", capdata.caplen - PCAP_ICMP_SKIP);
+                if (obfuscate) obfuscate_message(buffer + PCAP_ICMP_SKIP, capdata.caplen - PCAP_ICMP_SKIP);
+
+                res = sendto(serverfd, (char*)capbuffer + PCAP_ICMP_SKIP, capdata.caplen - PCAP_ICMP_SKIP, 0, (const struct sockaddr *)&clientaddr, clientaddrlen);
+            }
+            else
+            {
+                socklen_t msglen = recvfrom(remotefd, (char*)buffer, MTU_SIZE, 0, (struct sockaddr*)&remoteaddr, (unsigned int*)&remoteaddrlen);
+
+                if (msglen == -1)
+                {
+                    if (run)
+                    {
+                        perror("failed to read ICMP packet");
+                    }
+
+                    continue;
                 }
 
-                continue;
+                if (verbose) printf("Received %d bytes from remote\n", msglen - ICMP_SKIP);
+                if (obfuscate) obfuscate_message(buffer + ICMP_SKIP, msglen - ICMP_SKIP);
+
+                res = sendto(serverfd, (char*)buffer + ICMP_SKIP, msglen - ICMP_SKIP, 0, (const struct sockaddr *)&clientaddr, clientaddrlen);
             }
-
-            if (verbose) printf("Received %d bytes from remote\n", msglen - ICMP_SKIP);
-            if (obfuscate) obfuscate_message(buffer + ICMP_SKIP, msglen - ICMP_SKIP);
-
-            res = sendto(serverfd, (char*)buffer + ICMP_SKIP, msglen - ICMP_SKIP, 0, (const struct sockaddr *)&clientaddr, clientaddrlen);
         }
     }
 

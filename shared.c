@@ -21,9 +21,11 @@
 #define MODE_ICMP_UDP 4
 #define MTU_SIZE 1500
 
+#define ETHHDR_LEN 14
 #define IPHDR_LEN 20
 #define ICMP_LEN 8
 #define ICMP_SKIP (IPHDR_LEN + ICMP_LEN)
+#define PCAP_ICMP_SKIP (ETHHDR_LEN + IPHDR_LEN + ICMP_LEN)
 
 #define min(X, Y) (((X) < (Y)) ? (X) : (Y))
 
@@ -162,19 +164,67 @@ static inline unsigned short ip_checksum(char* data, unsigned int length)
     return htons(~acc);
 }
 
+void hexdump(const void* data, size_t size)
+{
+	char ascii[17];
+	size_t i, j;
+	ascii[16] = '\0';
+
+	for (i = 0; i < size; ++i)
+    {
+		printf("%02X ", ((unsigned char*)data)[i]);
+
+		if (((unsigned char*)data)[i] >= ' ' && ((unsigned char*)data)[i] <= '~')
+        {
+			ascii[i % 16] = ((unsigned char*)data)[i];
+		}
+        else
+        {
+			ascii[i % 16] = '.';
+		}
+
+		if ((i+1) % 8 == 0 || i+1 == size)
+        {
+			printf(" ");
+
+			if ((i+1) % 16 == 0)
+            {
+				printf("|  %s \n", ascii);
+			}
+            else if (i+1 == size)
+            {
+				ascii[(i+1) % 16] = '\0';
+
+				if ((i+1) % 16 <= 8)
+                {
+					printf(" ");
+				}
+
+				for (j = (i+1) % 16; j < 16; ++j)
+                {
+					printf("   ");
+				}
+                
+				printf("|  %s \n", ascii);
+			}
+		}
+	}
+}
+
 void print_help(char* argv[])
 {
     printf("usage: %s -r addr:port [args]\narguments:\n\n", argv[0]);
     printf("   -r addr:port\tRemote host to tunnel packets to.\n");
     printf("   -l addr:port\tLocal listening address and port.\n   \t\t  Optional, defaults to 127.0.0.1:8080\n");
-    printf("   -m mode\tOperation mode. Possible values:\n   \t\t  uu - UDP-to-UDP (Default)\n   \t\t  ut - UDP-to-TCP\n   \t\t  tu - TCP-to-UDP\n");
+    printf("   -m mode\tOperation mode. Possible values:\n   \t\t  uu - UDP-to-UDP (Default)\n   \t\t  ut - UDP-to-TCP\n   \t\t  tu - TCP-to-UDP\n   \t\t  ui - UDP-to-ICMP (Requires root)   \t\t  tu - ICMP-to-UDP (Requires root)\n\n");
+    printf("   -p\t\tUse PCAP, only applicable to UDP-to-ICMP, highly recommended.\n");
     printf("   -o\t\tEnable generic header obfuscation.\n");
     printf("   -v\t\tDetailed logging at the expense of decreased throughput.\n");
     printf("   -h\t\tDisplays this message.\n");
 }
 
 int parse_arguments(int argc, char* argv[],
-                    int *mode, int *verbose, int *obfuscate,
+                    int *mode, int *verbose, int *obfuscate, int *pcap,
                     struct sockaddr_in *localaddr, int *localport,
                     struct sockaddr_in *remoteaddr, int *remoteport)
 {
@@ -188,7 +238,7 @@ int parse_arguments(int argc, char* argv[],
     }
 
     int opt;
-    while((opt = getopt(argc, argv, "hm:l:r:ov")) != -1)
+    while((opt = getopt(argc, argv, "hm:l:r:opv")) != -1)
     {
         switch (opt)
         {
@@ -230,6 +280,10 @@ int parse_arguments(int argc, char* argv[],
             
             case 'o':
                 *obfuscate = 1;
+                break;
+            
+            case 'p':
+                *pcap = 1;
                 break;
             
             case 'l':
