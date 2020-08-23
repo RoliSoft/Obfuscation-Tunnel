@@ -7,7 +7,7 @@ int udp_icmp_tunnel(int verbose, int obfuscate, int pcap,
 {
     int res, remotebound = 0;
     int serverfd, remotefd;
-    struct pollfd fds[3];
+    struct pollfd fds[2];
     char buffer[MTU_SIZE];
     struct sockaddr_in clientaddr;
     int clientaddrlen = sizeof(clientaddr), remoteaddrlen = sizeof(remoteaddr);
@@ -34,13 +34,16 @@ int udp_icmp_tunnel(int verbose, int obfuscate, int pcap,
 
     if (pcap)
     {
+        pcap_if_t *capdevs;
         char caperr[PCAP_ERRBUF_SIZE];
-        capdev = pcap_lookupdev(caperr);
+
+        pcap_findalldevs(&capdevs, caperr);
         if (capdev == NULL) {
-            printf("Error finding device: %s\n", caperr);
+            printf("Error finding devices: %s\n", caperr);
             return 1;
         }
 
+        capdev = capdevs->name;
         capptr = pcap_open_live(capdev, MTU_SIZE, 1, 1, caperr);
         if (capptr == NULL)
         {
