@@ -1,34 +1,137 @@
 #include "shared.c"
 
+struct udp_tcp_session
+{
+    int verbose;
+    int obfuscate;
+    struct sockaddr_in localaddr;
+    int localport;
+    struct sockaddr_in remoteaddr;
+    int remoteport;
+    struct sockaddr_in clientaddr;
+    int clientaddrlen;
+    int remoteaddrlen;
+    int serverfd;
+    int remotefd;
+};
+
+int udp_tcp_server_to_remote_loop(struct udp_tcp_session *s)
+{
+    int res;
+    char buffer[MTU_SIZE + sizeof(unsigned short)];
+
+    while (run)
+    {
+        // udp -> tcp
+
+        socklen_t msglen = recvfrom(s->serverfd, ((char*)buffer) + sizeof(unsigned short), MTU_SIZE, MSG_WAITALL, (struct sockaddr*)&s->clientaddr, (unsigned int*)&s->clientaddrlen);
+
+        if (msglen == -1)
+        {
+            if (run)
+            {
+                perror("failed to read UDP packet");
+            }
+
+            continue;
+        }
+
+        if (s->verbose) printf("Received %d bytes from client\n", msglen);
+        if (s->obfuscate) obfuscate_message(((char*)buffer) + sizeof(unsigned short), msglen);
+
+        int sizelen = 0;
+        write_14bit(msglen, (char*)buffer, &sizelen);
+        int sizediff = sizeof(unsigned short) - sizelen;
+
+        if (sizediff == 1)
+        {
+            buffer[1] = buffer[0];
+        }
+
+        res = write(s->remotefd, (char*)buffer + sizediff, msglen + sizelen);
+    }
+
+    return EXIT_SUCCESS;
+}
+
+int udp_tcp_remote_to_server_loop(struct udp_tcp_session *s)
+{
+    int res;
+    char buffer[MTU_SIZE + sizeof(unsigned short)];
+
+    while (run)
+    {
+        // tcp -> udp
+
+        unsigned short toread = read_14bit(s->remotefd);
+
+        if (toread == 0)
+        {
+            printf("TCP connection to remote lost\n");
+            return EXIT_FAILURE;
+        }
+
+        if (toread > MTU_SIZE)
+        {
+            printf("Incorrect size read from buffer, abandoning read.\n");
+            continue;
+        }
+
+        unsigned short readsize = toread;
+
+        while (toread > 0 && run)
+        {
+            socklen_t msglen = read(s->remotefd, (char*)buffer + (readsize - toread), toread);
+
+            if (s->verbose && toread != msglen)
+            {
+                printf("Read partially, need %u more bytes.\n", toread - msglen);
+            }
+
+            toread -= msglen;
+        }
+
+        if (s->verbose) printf("Received %d bytes from remote\n", readsize);
+        if (s->obfuscate) obfuscate_message(buffer, readsize);
+
+        res = sendto(s->serverfd, (char*)buffer, readsize, 0, (const struct sockaddr *)&s->clientaddr, s->clientaddrlen);
+    }
+
+    return EXIT_SUCCESS;
+}
+
 int udp_tcp_tunnel(int verbose, int obfuscate,
                    struct sockaddr_in localaddr, int localport,
                    struct sockaddr_in remoteaddr, int remoteport)
 {
-    int res, remotebound = 0;
-    int serverfd, remotefd;
-    struct pollfd fds[2];
-    char buffer[MTU_SIZE + sizeof(unsigned short)];
-    struct sockaddr_in clientaddr;
-    int clientaddrlen = sizeof(clientaddr), remoteaddrlen = sizeof(remoteaddr);
+    struct udp_tcp_session s;
+    memset(&s, 0, sizeof(s));
 
-    memset(&clientaddr, 0, sizeof(clientaddr));
+    s.verbose = verbose;
+    s.obfuscate = obfuscate;
+    s.localaddr = localaddr;
+    s.localport = localport;
+    s.remoteaddr = remoteaddr;
+    s.remoteport = remoteport;
+    s.clientaddrlen = sizeof(s.clientaddr);
+    s.remoteaddrlen = sizeof(s.remoteaddr);
 
-    if ((serverfd = socket(AF_INET, SOCK_DGRAM, 0)) < 0)
+    if ((s.serverfd = socket(AF_INET, SOCK_DGRAM, 0)) < 0)
     { 
         perror("server socket creation failed");
         return EXIT_FAILURE;
     }
 
-    if ((remotefd = socket(AF_INET, SOCK_STREAM, 0)) < 0)
+    if ((s.remotefd = socket(AF_INET, SOCK_STREAM, 0)) < 0)
     { 
         perror("gateway socket creation failed");
         return EXIT_FAILURE;
     }
 
-    sockets[0] = serverfd;
-    sockets[1] = remotefd;
+    sockets[0] = s.serverfd;
+    sockets[1] = s.remotefd;
 
-    if (bind(serverfd, (const struct sockaddr *)&localaddr, sizeof(localaddr)) < 0)
+    if (bind(s.serverfd, (const struct sockaddr *)&s.localaddr, sizeof(s.localaddr)) < 0)
     {
         perror("bind failed");
         return EXIT_FAILURE;
@@ -36,129 +139,36 @@ int udp_tcp_tunnel(int verbose, int obfuscate,
 
     printf("Connecting to remote server...\n");
 
-    if ((res = connect(remotefd, (const struct sockaddr *)&remoteaddr, remoteaddrlen)) != 0)
+    if (connect(s.remotefd, (const struct sockaddr *)&s.remoteaddr, s.remoteaddrlen) != 0)
     {
         perror("failed to connect to remote host");
         return EXIT_FAILURE;
     }
 
-    memset(fds, 0 , sizeof(fds));
-    fds[0].fd = serverfd;
-    fds[0].events = POLLIN;
-    fds[1].fd = remotefd;
-    fds[1].events = POLLIN;
-
     int i = 1;
-    setsockopt(serverfd, IPPROTO_TCP, TCP_NODELAY, (void *)&i, sizeof(i));
+    setsockopt(s.serverfd, IPPROTO_TCP, TCP_NODELAY, (void *)&i, sizeof(i));
 #ifdef TCP_QUICKACK
-    setsockopt(serverfd, IPPROTO_TCP, TCP_QUICKACK, (void *)&i, sizeof(i));
+    setsockopt(s.serverfd, IPPROTO_TCP, TCP_QUICKACK, (void *)&i, sizeof(i));
 #endif
 
-    //fcntl(remotefd, F_SETFL, O_NONBLOCK);
+    //fcntl(s.remotefd, F_SETFL, O_NONBLOCK);
 
-    if (obfuscate) printf("Header obfuscation enabled.\n");
+    if (s.obfuscate) printf("Header obfuscation enabled.\n");
 
-    while (run)
+    pthread_t threads[2];
+
+    pthread_create(&threads[0], NULL, (void*(*)(void*))&udp_tcp_server_to_remote_loop, (void*)&s);
+    pthread_create(&threads[1], NULL, (void*(*)(void*))&udp_tcp_remote_to_server_loop, (void*)&s);
+
+    for (int i = 0; i < sizeof(threads) / sizeof(threads[0]); i++)
     {
-        if (verbose) printf("Polling...\n");
-
-        res = poll(fds, 2, (3 * 60 * 1000));
-
-        if (res == 0)
-        {
-            continue;
-        }
-        else if (res < 0)
-        {
-            if (run)
-            {
-                perror("poll failed");
-                return EXIT_FAILURE;
-            }
-            else
-            {
-                return EXIT_SUCCESS;
-            }
-        }
-
-        if (fds[1].revents & POLLHUP || fds[1].revents & POLLERR)
-        {
-            printf("TCP connection to remote lost\n");
-            return EXIT_FAILURE;
-        }
-
-        if (fds[0].revents & POLLIN)
-        {
-            // udp -> tcp
-
-            socklen_t msglen = recvfrom(serverfd, ((char*)buffer) + sizeof(unsigned short), MTU_SIZE, MSG_WAITALL, (struct sockaddr*)&clientaddr, (unsigned int*)&clientaddrlen);
-
-            if (msglen == -1)
-            {
-                if (run)
-                {
-                    perror("failed to read UDP packet");
-                }
-
-                continue;
-            }
-
-            if (verbose) printf("Received %d bytes from client\n", msglen);
-            if (obfuscate) obfuscate_message(((char*)buffer) + sizeof(unsigned short), msglen);
-
-            int sizelen = 0;
-            write_14bit(msglen, (char*)buffer, &sizelen);
-            int sizediff = sizeof(unsigned short) - sizelen;
-
-            if (sizediff == 1)
-            {
-                buffer[1] = buffer[0];
-            }
-
-            res = write(remotefd, (char*)buffer + sizediff, msglen + sizelen);
-        }
-
-        if (fds[1].revents & POLLIN)
-        {
-            // tcp -> udp
-
-            unsigned short toread = read_14bit(remotefd);
-
-            if (toread == 0)
-            {
-                printf("TCP connection to remote lost\n");
-                return EXIT_FAILURE;
-            }
-
-            if (toread > MTU_SIZE)
-            {
-                printf("Incorrect size read from buffer, abandoning read.\n");
-                continue;
-            }
-
-            unsigned short readsize = toread;
-
-            while (toread > 0 && run)
-            {
-                socklen_t msglen = read(remotefd, (char*)buffer + (readsize - toread), toread);
-
-                if (verbose && toread != msglen)
-                {
-                    printf("Read partially, need %u more bytes.\n", toread - msglen);
-                }
-
-                toread -= msglen;
-            }
-
-            if (verbose) printf("Received %d bytes from remote\n", readsize);
-            if (obfuscate) obfuscate_message(buffer, readsize);
-
-            res = sendto(serverfd, (char*)buffer, readsize, 0, (const struct sockaddr *)&clientaddr, clientaddrlen);
-        }
+        pthread_join(threads[i], NULL);  
     }
 
-    close(serverfd);
-    close(remotefd);
+    pthread_exit(NULL);
+
+    close(s.serverfd);
+    close(s.remotefd);
 
     return 0;
 }

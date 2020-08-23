@@ -119,9 +119,6 @@ int udp_udp_tunnel(int verbose, int obfuscate,
     s.clientaddrlen = sizeof(s.clientaddr);
     s.remoteaddrlen = sizeof(s.remoteaddr);
 
-    int res, remotebound = 0;
-    char buffer[MTU_SIZE];
-
     if ((s.serverfd = socket(AF_INET, SOCK_DGRAM, 0)) < 0)
     { 
         perror("server socket creation failed");
@@ -149,8 +146,8 @@ int udp_udp_tunnel(int verbose, int obfuscate,
 
     pthread_t threads[2];
 
-    res = pthread_create(&threads[0], NULL, (void*(*)(void*))&udp_udp_server_to_remote_loop, (void*)&s);
-    res = pthread_create(&threads[1], NULL, (void*(*)(void*))&udp_udp_remote_to_server_loop, (void*)&s);
+    pthread_create(&threads[0], NULL, (void*(*)(void*))&udp_udp_server_to_remote_loop, (void*)&s);
+    pthread_create(&threads[1], NULL, (void*(*)(void*))&udp_udp_remote_to_server_loop, (void*)&s);
 
     for (int i = 0; i < sizeof(threads) / sizeof(threads[0]); i++)
     {
