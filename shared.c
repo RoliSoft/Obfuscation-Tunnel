@@ -14,6 +14,7 @@
 #include <fcntl.h>
 #include <signal.h>
 #include <pthread.h>
+#include <errno.h>
 
 #define MODE_UDP_UDP 0
 #define MODE_UDP_TCP 1
