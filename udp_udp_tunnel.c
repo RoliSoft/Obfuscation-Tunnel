@@ -4,6 +4,7 @@ void udp_udp_server_to_remote_loop(struct session *s)
 {
     int res;
     char buffer[MTU_SIZE];
+    socklen_t addrlen;
 
     while (run)
     {
@@ -11,7 +12,7 @@ void udp_udp_server_to_remote_loop(struct session *s)
         {
             if (s->verbose) printf("Waiting for first packet from client...\n");
 
-            socklen_t msglen = recvfrom(s->serverfd, (char*)buffer, MTU_SIZE, MSG_WAITALL, (struct sockaddr*)&s->clientaddr, (unsigned int*)&s->clientaddrlen);
+            socklen_t msglen = recvfrom(s->serverfd, (char*)buffer, MTU_SIZE, MSG_WAITALL, (struct sockaddr*)&s->clientaddr, &addrlen);
 
             if (msglen == -1)
             {
@@ -30,13 +31,13 @@ void udp_udp_server_to_remote_loop(struct session *s)
             if (s->verbose) printf("Received %d bytes from client\n", msglen);
             if (s->obfuscate) obfuscate_message(buffer, msglen);
 
-            res = sendto(s->remotefd, (char*)buffer, msglen, 0, (const struct sockaddr *)&s->remoteaddr, s->remoteaddrlen);
+            res = sendto(s->remotefd, (char*)buffer, msglen, 0, (const struct sockaddr *)&s->remoteaddr, IP_SIZE);
 
             s->remotebound = 1;
             continue;
         }
 
-        socklen_t msglen = recvfrom(s->serverfd, (char*)buffer, MTU_SIZE, MSG_WAITALL, (struct sockaddr*)&s->clientaddr, (unsigned int*)&s->clientaddrlen);
+        socklen_t msglen = recvfrom(s->serverfd, (char*)buffer, MTU_SIZE, MSG_WAITALL, (struct sockaddr*)&s->clientaddr, &addrlen);
 
         if (msglen == -1)
         {
@@ -51,7 +52,7 @@ void udp_udp_server_to_remote_loop(struct session *s)
         if (s->verbose) printf("Received %d bytes from client\n", msglen);
         if (s->obfuscate) obfuscate_message(buffer, msglen);
 
-        res = sendto(s->remotefd, (char*)buffer, msglen, 0, (const struct sockaddr *)&s->remoteaddr, s->remoteaddrlen);
+        res = sendto(s->remotefd, (char*)buffer, msglen, 0, (const struct sockaddr *)&s->remoteaddr, IP_SIZE);
     }
 }
 
@@ -59,6 +60,7 @@ void udp_udp_remote_to_server_loop(struct session *s)
 {
     int res;
     char buffer[MTU_SIZE];
+    socklen_t addrlen;
 
     while (run)
     {
@@ -68,7 +70,7 @@ void udp_udp_remote_to_server_loop(struct session *s)
             continue;
         }
 
-        socklen_t msglen = recvfrom(s->remotefd, (char*)buffer, MTU_SIZE, MSG_WAITALL, (struct sockaddr*)&s->remoteaddr, (unsigned int*)&s->remoteaddrlen);
+        socklen_t msglen = recvfrom(s->remotefd, (char*)buffer, MTU_SIZE, MSG_WAITALL, (struct sockaddr*)&s->remoteaddr, &addrlen);
 
         if (msglen == -1)
         {
@@ -83,7 +85,7 @@ void udp_udp_remote_to_server_loop(struct session *s)
         if (s->verbose) printf("Received %d bytes from remote\n", msglen);
         if (s->obfuscate) obfuscate_message(buffer, msglen);
 
-        res = sendto(s->serverfd, (char*)buffer, msglen, 0, (const struct sockaddr *)&s->clientaddr, s->clientaddrlen);
+        res = sendto(s->serverfd, (char*)buffer, msglen, 0, (const struct sockaddr *)&s->clientaddr, IP_SIZE);
     }
 }
 

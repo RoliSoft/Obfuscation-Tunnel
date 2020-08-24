@@ -24,6 +24,7 @@
 #define MODE_ICMP_UDP 4
 #define MTU_SIZE 1500
 
+#define IP_SIZE sizeof(struct sockaddr_in)
 #define ETHHDR_LEN 14
 #define IPHDR_LEN 20
 #define IPHDR_SRC_OFFSET 12
@@ -48,14 +49,11 @@ struct session
     struct sockaddr_in remoteaddr;
     int remoteport;
     struct sockaddr_in clientaddr;
-    int clientaddrlen;
-    int remoteaddrlen;
     int serverfd;
     int remotefd;
     int clientfd;
     int remotebound;
     unsigned short sequence;
-    char *capdev;
     pcap_t *capptr;
 };
 
@@ -380,9 +378,6 @@ int parse_arguments(int argc, char* argv[], struct session *s)
         s->localaddr.sin_port = htons(s->localport);
         inet_pton(AF_INET, "127.0.0.1", &(s->localaddr.sin_addr));
     }
-
-    s->clientaddrlen = sizeof(s->clientaddr);
-    s->remoteaddrlen = sizeof(s->remoteaddr);
 
     return -1;
 }

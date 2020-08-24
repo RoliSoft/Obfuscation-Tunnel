@@ -4,6 +4,7 @@ void udp_icmp_server_to_remote_loop(struct session *s)
 {
     int res;
     char buffer[MTU_SIZE];
+    socklen_t addrlen;
 
     while (run)
     {
@@ -11,7 +12,7 @@ void udp_icmp_server_to_remote_loop(struct session *s)
         {
             if (s->verbose) printf("Waiting for first packet from client...\n");
 
-            socklen_t msglen = recvfrom(s->serverfd, (char*)buffer + ICMP_LEN, MTU_SIZE - ICMP_LEN, 0, (struct sockaddr*)&s->clientaddr, (unsigned int*)&s->clientaddrlen);
+            socklen_t msglen = recvfrom(s->serverfd, (char*)buffer + ICMP_LEN, MTU_SIZE - ICMP_LEN, 0, (struct sockaddr*)&s->clientaddr, &addrlen);
 
             if (msglen == -1)
             {
@@ -36,13 +37,13 @@ void udp_icmp_server_to_remote_loop(struct session *s)
             *((unsigned short*)&buffer[2]) = 0; // zero checksum before calculation
             *((unsigned short*)&buffer[2]) = ip_checksum((char*)&buffer, msglen + ICMP_LEN);
 
-            res = sendto(s->remotefd, (char*)buffer, msglen + ICMP_LEN, 0, (const struct sockaddr *)&s->remoteaddr, s->remoteaddrlen);
+            res = sendto(s->remotefd, (char*)buffer, msglen + ICMP_LEN, 0, (const struct sockaddr *)&s->remoteaddr, IP_SIZE);
 
             s->remotebound = 1;
             continue;
         }
 
-        socklen_t msglen = recvfrom(s->serverfd, (char*)buffer + ICMP_LEN, MTU_SIZE - ICMP_LEN, MSG_WAITALL, (struct sockaddr*)&s->clientaddr, (unsigned int*)&s->clientaddrlen);
+        socklen_t msglen = recvfrom(s->serverfd, (char*)buffer + ICMP_LEN, MTU_SIZE - ICMP_LEN, MSG_WAITALL, (struct sockaddr*)&s->clientaddr, &addrlen);
 
         if (msglen == -1)
         {
@@ -63,7 +64,7 @@ void udp_icmp_server_to_remote_loop(struct session *s)
         *((unsigned short*)&buffer[2]) = 0; // zero checksum before calculation
         *((unsigned short*)&buffer[2]) = ip_checksum((char*)&buffer, msglen + ICMP_LEN);
 
-        res = sendto(s->remotefd, (char*)buffer, msglen + ICMP_LEN, 0, (const struct sockaddr *)&s->remoteaddr, s->remoteaddrlen);
+        res = sendto(s->remotefd, (char*)buffer, msglen + ICMP_LEN, 0, (const struct sockaddr *)&s->remoteaddr, IP_SIZE);
     }
 }
 
@@ -71,6 +72,7 @@ void udp_icmp_remote_to_server_loop(struct session *s)
 {
     int res;
     char buffer[MTU_SIZE];
+    socklen_t addrlen;
 
     while (run)
     {
@@ -80,7 +82,7 @@ void udp_icmp_remote_to_server_loop(struct session *s)
             continue;
         }
 
-        socklen_t msglen = recvfrom(s->remotefd, (char*)buffer, MTU_SIZE, 0, (struct sockaddr*)&s->remoteaddr, (unsigned int*)&s->remoteaddrlen);
+        socklen_t msglen = recvfrom(s->remotefd, (char*)buffer, MTU_SIZE, 0, (struct sockaddr*)&s->remoteaddr, &addrlen);
 
         if (msglen == -1)
         {
@@ -95,7 +97,7 @@ void udp_icmp_remote_to_server_loop(struct session *s)
         if (s->verbose) printf("Received %d bytes from remote\n", msglen - ICMP_SKIP);
         if (s->obfuscate) obfuscate_message(buffer + ICMP_SKIP, msglen - ICMP_SKIP);
 
-        res = sendto(s->serverfd, (char*)buffer + ICMP_SKIP, msglen - ICMP_SKIP, 0, (const struct sockaddr *)&s->clientaddr, s->clientaddrlen);
+        res = sendto(s->serverfd, (char*)buffer + ICMP_SKIP, msglen - ICMP_SKIP, 0, (const struct sockaddr *)&s->clientaddr, IP_SIZE);
     }
 }
 
@@ -128,7 +130,7 @@ void udp_icmp_remote_to_server_pcap_loop(struct session *s)
         if (s->verbose) printf("Received %d bytes from remote\n", capdata.caplen - PCAP_ICMP_SKIP);
         if (s->obfuscate) obfuscate_message((char*)capbuffer + PCAP_ICMP_SKIP, capdata.caplen - PCAP_ICMP_SKIP);
 
-        res = sendto(s->serverfd, (char*)capbuffer + PCAP_ICMP_SKIP, capdata.caplen - PCAP_ICMP_SKIP, 0, (const struct sockaddr *)&s->clientaddr, s->clientaddrlen);
+        res = sendto(s->serverfd, (char*)capbuffer + PCAP_ICMP_SKIP, capdata.caplen - PCAP_ICMP_SKIP, 0, (const struct sockaddr *)&s->clientaddr, IP_SIZE);
     }
 }
 
@@ -158,15 +160,15 @@ int udp_icmp_tunnel(struct session *s)
             return EXIT_FAILURE;
         }
 
-        s->capdev = capdevs->name;
-        s->capptr = pcap_open_live(s->capdev, MTU_SIZE, 1, 1, caperr);
+        char* capdev = capdevs->name;
+        s->capptr = pcap_open_live(capdev, MTU_SIZE, 1, 1, caperr);
         if (s->capptr == NULL)
         {
-            fprintf(stderr, "Can't open pcap device %s: %s\n", s->capdev, caperr);
+            fprintf(stderr, "Can't open pcap device %s: %s\n", capdev, caperr);
             return EXIT_FAILURE;
         }
 
-        printf("Device selected for packet capture: %s\n", s->capdev);
+        printf("Device selected for packet capture: %s\n", capdev);
 
         char bpf_filter[] = "icmp[icmptype] == icmp-echoreply and icmp[4] == 0x13 and icmp[5] = 0x37";
         struct bpf_program fp;

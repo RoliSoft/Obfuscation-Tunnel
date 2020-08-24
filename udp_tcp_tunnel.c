@@ -4,12 +4,13 @@ int udp_tcp_server_to_remote_loop(struct session *s)
 {
     int res;
     char buffer[MTU_SIZE + sizeof(unsigned short)];
+    socklen_t addrlen;
 
     while (run)
     {
         // udp -> tcp
 
-        socklen_t msglen = recvfrom(s->serverfd, ((char*)buffer) + sizeof(unsigned short), MTU_SIZE, MSG_WAITALL, (struct sockaddr*)&s->clientaddr, (unsigned int*)&s->clientaddrlen);
+        socklen_t msglen = recvfrom(s->serverfd, ((char*)buffer) + sizeof(unsigned short), MTU_SIZE, MSG_WAITALL, (struct sockaddr*)&s->clientaddr, &addrlen);
 
         if (msglen == -1)
         {
@@ -79,7 +80,7 @@ int udp_tcp_remote_to_server_loop(struct session *s)
         if (s->verbose) printf("Received %d bytes from remote\n", readsize);
         if (s->obfuscate) obfuscate_message(buffer, readsize);
 
-        res = sendto(s->serverfd, (char*)buffer, readsize, 0, (const struct sockaddr *)&s->clientaddr, s->clientaddrlen);
+        res = sendto(s->serverfd, (char*)buffer, readsize, 0, (const struct sockaddr *)&s->clientaddr, IP_SIZE);
     }
 
     return EXIT_SUCCESS;
@@ -110,7 +111,7 @@ int udp_tcp_tunnel(struct session *s)
 
     printf("Connecting to remote server...\n");
 
-    if (connect(s->remotefd, (const struct sockaddr *)&s->remoteaddr, s->remoteaddrlen) != 0)
+    if (connect(s->remotefd, (const struct sockaddr *)&s->remoteaddr, IP_SIZE) != 0)
     {
         perror("failed to connect to remote host");
         return EXIT_FAILURE;

@@ -1,2 +1,4 @@
 tunnel
 *.o
+.vscode
+tunnel.dSYM
