@@ -10,7 +10,7 @@ int udp_tcp_server_to_remote_loop(struct session *s)
     {
         // udp -> tcp
 
-        socklen_t msglen = recvfrom(s->serverfd, ((char*)buffer) + sizeof(unsigned short), MTU_SIZE, MSG_WAITALL, (struct sockaddr*)&s->clientaddr, &addrlen);
+        socklen_t msglen = recvfrom(s->server_fd, ((char*)buffer) + sizeof(unsigned short), MTU_SIZE, MSG_WAITALL, (struct sockaddr*)&s->client_addr, &addrlen);
 
         if (msglen == -1)
         {
@@ -34,7 +34,7 @@ int udp_tcp_server_to_remote_loop(struct session *s)
             buffer[1] = buffer[0];
         }
 
-        res = write(s->remotefd, (char*)buffer + sizediff, msglen + sizelen);
+        res = write(s->remote_fd, (char*)buffer + sizediff, msglen + sizelen);
     }
 
     return EXIT_SUCCESS;
@@ -49,7 +49,7 @@ int udp_tcp_remote_to_server_loop(struct session *s)
     {
         // tcp -> udp
 
-        unsigned short toread = read_14bit(s->remotefd);
+        unsigned short toread = read_14bit(s->remote_fd);
 
         if (toread == 0)
         {
@@ -67,7 +67,7 @@ int udp_tcp_remote_to_server_loop(struct session *s)
 
         while (toread > 0 && run)
         {
-            socklen_t msglen = read(s->remotefd, (char*)buffer + (readsize - toread), toread);
+            socklen_t msglen = read(s->remote_fd, (char*)buffer + (readsize - toread), toread);
 
             if (s->verbose && toread != msglen)
             {
@@ -80,7 +80,7 @@ int udp_tcp_remote_to_server_loop(struct session *s)
         if (s->verbose) printf("Received %d bytes from remote\n", readsize);
         if (s->obfuscate) obfuscate_message(buffer, readsize);
 
-        res = sendto(s->serverfd, (char*)buffer, readsize, 0, (const struct sockaddr *)&s->clientaddr, IP_SIZE);
+        res = sendto(s->server_fd, (char*)buffer, readsize, 0, (const struct sockaddr *)&s->client_addr, IP_SIZE);
     }
 
     return EXIT_SUCCESS;
@@ -88,22 +88,22 @@ int udp_tcp_remote_to_server_loop(struct session *s)
 
 int udp_tcp_tunnel(struct session *s)
 {
-    if ((s->serverfd = socket(AF_INET, SOCK_DGRAM, 0)) < 0)
+    if ((s->server_fd = socket(AF_INET, SOCK_DGRAM, 0)) < 0)
     { 
         perror("server socket creation failed");
         return EXIT_FAILURE;
     }
 
-    if ((s->remotefd = socket(AF_INET, SOCK_STREAM, 0)) < 0)
+    if ((s->remote_fd = socket(AF_INET, SOCK_STREAM, 0)) < 0)
     { 
         perror("gateway socket creation failed");
         return EXIT_FAILURE;
     }
 
-    sockets[0] = s->serverfd;
-    sockets[1] = s->remotefd;
+    sockets[0] = s->server_fd;
+    sockets[1] = s->remote_fd;
 
-    if (bind(s->serverfd, (const struct sockaddr *)&s->localaddr, sizeof(s->localaddr)) < 0)
+    if (bind(s->server_fd, (const struct sockaddr *)&s->local_addr, sizeof(s->local_addr)) < 0)
     {
         perror("bind failed");
         return EXIT_FAILURE;
@@ -111,19 +111,19 @@ int udp_tcp_tunnel(struct session *s)
 
     printf("Connecting to remote server...\n");
 
-    if (connect(s->remotefd, (const struct sockaddr *)&s->remoteaddr, IP_SIZE) != 0)
+    if (connect(s->remote_fd, (const struct sockaddr *)&s->remote_addr, IP_SIZE) != 0)
     {
         perror("failed to connect to remote host");
         return EXIT_FAILURE;
     }
 
     int i = 1;
-    setsockopt(s->serverfd, IPPROTO_TCP, TCP_NODELAY, (void *)&i, sizeof(i));
+    setsockopt(s->server_fd, IPPROTO_TCP, TCP_NODELAY, (void *)&i, sizeof(i));
 #ifdef TCP_QUICKACK
-    setsockopt(s->serverfd, IPPROTO_TCP, TCP_QUICKACK, (void *)&i, sizeof(i));
+    setsockopt(s->server_fd, IPPROTO_TCP, TCP_QUICKACK, (void *)&i, sizeof(i));
 #endif
 
-    //fcntl(s->remotefd, F_SETFL, O_NONBLOCK);
+    //fcntl(s->remote_fd, F_SETFL, O_NONBLOCK);
 
     if (s->obfuscate) printf("Header obfuscation enabled.\n");
 
@@ -139,8 +139,8 @@ int udp_tcp_tunnel(struct session *s)
 
     pthread_exit(NULL);
 
-    close(s->serverfd);
-    close(s->remotefd);
+    close(s->server_fd);
+    close(s->remote_fd);
 
     return 0;
 }

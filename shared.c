@@ -40,21 +40,30 @@ static int sockets[10];
 
 struct session
 {
+    // boolean flags
     int mode;
     int verbose;
     int obfuscate;
     int pcap;
-    struct sockaddr_in localaddr;
-    int localport;
-    struct sockaddr_in remoteaddr;
-    int remoteport;
-    struct sockaddr_in clientaddr;
-    int serverfd;
-    int remotefd;
-    int clientfd;
-    int remotebound;
+
+    // local server configured with -l
+    struct sockaddr_in local_addr;
+    int local_port;
+    int server_fd;
+
+    // remote gateway or end server configured with -r
+    struct sockaddr_in remote_addr;
+    int remote_port;
+    int remote_fd;
+
+    // address of the connecting client to local server
+    struct sockaddr_in client_addr;
+    int client_fd;
+
+    // protocol-dependent stateful variables
+    int connected;
     unsigned short sequence;
-    pcap_t *capptr;
+    pcap_t *cap_ptr;
 };
 
 static void sig_handler(int _)
@@ -260,7 +269,7 @@ int parse_arguments(int argc, char* argv[], struct session *s)
     }
 
     memset(s, 0, sizeof(*s));
-    s->localport = 8080;
+    s->local_port = 8080;
 
     int opt;
     while((opt = getopt(argc, argv, "hm:l:r:opv")) != -1)
@@ -324,17 +333,17 @@ int parse_arguments(int argc, char* argv[], struct session *s)
                 token = strtok(NULL, ":");
                 if (token != NULL)
                 {
-                    s->localport = strtoul(token, NULL, 0);
+                    s->local_port = strtoul(token, NULL, 0);
                 }
                 else
                 {
-                    s->localport = 0;
+                    s->local_port = 0;
                 }
 
-                memset(&s->localaddr, 0, sizeof(s->localaddr));
-                memcpy(&(s->localaddr.sin_addr), localhost->h_addr_list[0], localhost->h_length);
-                s->localaddr.sin_family = AF_INET;
-                s->localaddr.sin_port = htons(s->localport);
+                memset(&s->local_addr, 0, sizeof(s->local_addr));
+                memcpy(&(s->local_addr.sin_addr), localhost->h_addr_list[0], localhost->h_length);
+                s->local_addr.sin_family = AF_INET;
+                s->local_addr.sin_port = htons(s->local_port);
                 break;
 
             case 'r':
@@ -350,17 +359,17 @@ int parse_arguments(int argc, char* argv[], struct session *s)
                 token = strtok(NULL, ":");
                 if (token != NULL)
                 {
-                    s->remoteport = strtoul(token, NULL, 0);
+                    s->remote_port = strtoul(token, NULL, 0);
                 }
                 else
                 {
-                    s->remoteport = 0;
+                    s->remote_port = 0;
                 }
 
-                memset(&s->remoteaddr, 0, sizeof(s->remoteaddr));
-                memcpy(&(s->remoteaddr.sin_addr), remotehost->h_addr_list[0], remotehost->h_length);
-                s->remoteaddr.sin_family = AF_INET;
-                s->remoteaddr.sin_port = htons(s->remoteport);
+                memset(&s->remote_addr, 0, sizeof(s->remote_addr));
+                memcpy(&(s->remote_addr.sin_addr), remotehost->h_addr_list[0], remotehost->h_length);
+                s->remote_addr.sin_family = AF_INET;
+                s->remote_addr.sin_port = htons(s->remote_port);
                 break;
         }
     }
@@ -373,10 +382,10 @@ int parse_arguments(int argc, char* argv[], struct session *s)
 
     if (localhost == NULL)
     {
-        memset(&s->localaddr, 0, sizeof(s->localaddr));
-        s->localaddr.sin_family = AF_INET;
-        s->localaddr.sin_port = htons(s->localport);
-        inet_pton(AF_INET, "127.0.0.1", &(s->localaddr.sin_addr));
+        memset(&s->local_addr, 0, sizeof(s->local_addr));
+        s->local_addr.sin_family = AF_INET;
+        s->local_addr.sin_port = htons(s->local_port);
+        inet_pton(AF_INET, "127.0.0.1", &(s->local_addr.sin_addr));
     }
 
     return -1;
