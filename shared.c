@@ -21,7 +21,9 @@
     #include <linux/filter.h>
 #endif
 
-#include <pcap/pcap.h>
+#if HAVE_PCAP
+    #include <pcap/pcap.h>
+#endif
 
 #define MODE_UDP_UDP 0
 #define MODE_UDP_TCP 1
@@ -57,7 +59,9 @@ struct session
     int mode;
     int verbose;
     int obfuscate;
+#if HAVE_PCAP
     int pcap;
+#endif
 
     // local server configured with -l
     struct sockaddr_in local_addr;
@@ -79,7 +83,10 @@ struct session
     // protocol-dependent stateful variables
     int connected;
     unsigned short sequence;
+
+#if HAVE_PCAP
     pcap_t *cap_ptr;
+#endif
 };
 
 static void sig_handler(int _)
@@ -349,7 +356,9 @@ void print_help(char* argv[])
     printf("   -r addr:port\tRemote host to tunnel packets to.\n");
     printf("   -l addr:port\tLocal listening address and port.\n   \t\t  Optional, defaults to 127.0.0.1:8080\n");
     printf("   -m mode\tOperation mode. Possible values:\n   \t\t  uu - UDP-to-UDP (Default)\n   \t\t  ut - UDP-to-TCP\n   \t\t  tu - TCP-to-UDP\n   \t\t  ui - UDP-to-ICMP (Requires root)\n   \t\t  iu - ICMP-to-UDP (Requires root)\n   \t\t  ui6 - UDP-to-ICMPv6 (Requires root)\n   \t\t  i6u - ICMPv6-to-UDP (Requires root)\n");
+#if HAVE_PCAP
     printf("   -p\t\tUse PCAP, only applicable to ICMP tunnels, highly recommended.\n");
+#endif
     printf("   -o\t\tEnable generic header obfuscation.\n");
     printf("   -v\t\tDetailed logging at the expense of decreased throughput.\n");
     printf("   -h\t\tDisplays this message.\n");
@@ -408,7 +417,7 @@ int parse_arguments(int argc, char* argv[], struct session *s)
                 }
                 else
                 {
-                    fprintf(stderr, "unrecognized operating mode\n");
+                    fprintf(stderr, "Unrecognized operating mode in flag -m.\n");
                     return EXIT_FAILURE;
                 }
                 break;
@@ -422,8 +431,13 @@ int parse_arguments(int argc, char* argv[], struct session *s)
                 break;
             
             case 'p':
+#if HAVE_PCAP
                 s->pcap = 1;
                 break;
+#else
+                fprintf(stderr, "This version was not compiled with PCAP support.\n");
+                return EXIT_FAILURE;
+#endif
             
             case 'l':
                 localhost = optarg;
@@ -462,7 +476,7 @@ int parse_arguments(int argc, char* argv[], struct session *s)
     }
     else
     {
-        fprintf(stderr, "you need to declare a remote host and port with -r\n");
+        fprintf(stderr, "You need to declare a remote host and port with -r.\n");
         return EXIT_FAILURE;
     }
 

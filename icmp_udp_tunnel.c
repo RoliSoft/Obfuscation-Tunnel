@@ -65,6 +65,7 @@ void icmp_udp_server_to_remote_loop(struct session *s)
     }
 }
 
+#if HAVE_PCAP
 void icmp_udp_server_to_remote_pcap_loop(struct session *s)
 {
     int res;
@@ -122,6 +123,7 @@ void icmp_udp_server_to_remote_pcap_loop(struct session *s)
         }
     }
 }
+#endif
 
 void icmp_udp_remote_to_server_loop(struct session *s)
 {
@@ -183,6 +185,7 @@ int icmp_udp_tunnel(struct session *s)
         return EXIT_FAILURE;
     }
 
+#if HAVE_PCAP
     if (s->pcap)
     {
         pcap_if_t *capdevs;
@@ -255,6 +258,9 @@ int icmp_udp_tunnel(struct session *s)
         printf("Packet filtering for BSD not implemented, use -p if connection is unstable.\n");
 #endif
     }
+#else
+    printf("ICMP tunnels are much faster and stable when used with PCAP.\n");
+#endif
 
     sockets[0] = s->server_fd;
     sockets[1] = s->remote_fd;
@@ -263,11 +269,13 @@ int icmp_udp_tunnel(struct session *s)
 
     pthread_t threads[2];
 
+#if HAVE_PCAP
     if (s->pcap)
     {
         pthread_create(&threads[1], NULL, (void*(*)(void*))&icmp_udp_server_to_remote_pcap_loop, (void*)s);
     }
     else
+#endif
     {
         pthread_create(&threads[1], NULL, (void*(*)(void*))&icmp_udp_server_to_remote_loop, (void*)s);
     }
