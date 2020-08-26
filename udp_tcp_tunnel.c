@@ -4,7 +4,7 @@ int udp_tcp_server_to_remote_loop(struct session *s)
 {
     int res;
     char buffer[MTU_SIZE + sizeof(unsigned short)];
-    socklen_t addrlen;
+    socklen_t addrlen = IP_SIZE;
 
     while (run)
     {
@@ -35,6 +35,11 @@ int udp_tcp_server_to_remote_loop(struct session *s)
         }
 
         res = write(s->remote_fd, (char*)buffer + sizediff, msglen + sizelen);
+
+        if (res < 0)
+        {
+            perror("failed to send TCP packet");
+        }
     }
 
     return EXIT_SUCCESS;
@@ -81,6 +86,11 @@ int udp_tcp_remote_to_server_loop(struct session *s)
         if (s->obfuscate) obfuscate_message(buffer, readsize);
 
         res = sendto(s->server_fd, (char*)buffer, readsize, 0, (const struct sockaddr *)&s->client_addr, IP_SIZE);
+
+        if (res < 0)
+        {
+            perror("failed to send UDP packet");
+        }
     }
 
     return EXIT_SUCCESS;

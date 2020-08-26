@@ -4,10 +4,12 @@ void icmp_udp_server_to_remote_loop(struct session *s)
 {
     int res;
     char buffer[MTU_SIZE];
-    socklen_t addrlen;
+    socklen_t addrlen = IP_SIZE;
 
     while (run)
     {
+        // icmp -> udp
+
         if (!s->connected)
         {
             if (s->verbose) printf("Waiting for first packet from client...\n");
@@ -34,6 +36,11 @@ void icmp_udp_server_to_remote_loop(struct session *s)
             s->sequence = *((unsigned short*)&buffer[6 + IPHDR_LEN]);
 
             res = sendto(s->remote_fd, (char*)buffer + ICMP_SKIP, msglen - ICMP_SKIP, 0, (const struct sockaddr *)&s->remote_addr, IP_SIZE);
+            
+            if (res < 0)
+            {
+                perror("failed to send UDP packet");
+            }
 
             s->connected = 1;
             continue;
@@ -57,6 +64,11 @@ void icmp_udp_server_to_remote_loop(struct session *s)
         s->sequence = ntohs(*((unsigned short*)&buffer[IPHDR_LEN + ICMP_SEQ_OFFSET]));
 
         res = sendto(s->remote_fd, (char*)buffer + ICMP_SKIP, msglen - ICMP_SKIP, 0, (const struct sockaddr *)&s->remote_addr, IP_SIZE);
+        
+        if (res < 0)
+        {
+            perror("failed to send UDP packet");
+        }
     }
 }
 
@@ -68,6 +80,8 @@ void icmp_udp_server_to_remote_pcap_loop(struct session *s)
 
     while (run)
     {
+        // icmp -> udp
+
         if (!s->connected)
         {
             if (s->verbose) printf("Waiting for first packet from client...\n");
@@ -84,14 +98,19 @@ void icmp_udp_server_to_remote_pcap_loop(struct session *s)
             s->client_addr.sin_family = AF_INET;
             s->client_addr.sin_addr = *((struct in_addr*)((char*)cap_buffer + ETHHDR_LEN + IPHDR_SRC_OFFSET));
 
-            char clientaddrstr[INET_ADDRSTRLEN];
-            inet_ntop(AF_INET, &(s->client_addr.sin_addr), clientaddrstr, INET_ADDRSTRLEN);
-            printf("Client connected from %s\n", clientaddrstr);
+            printf("Client connected from ");
+            print_ip(&s->client_addr);
+            printf("\n");
             
             if (s->verbose) printf("Received %d bytes from client\n", cap_data.caplen - PCAP_ICMP_SKIP);
             if (s->obfuscate) obfuscate_message((char*)cap_buffer + PCAP_ICMP_SKIP, cap_data.caplen - PCAP_ICMP_SKIP);
 
             res = sendto(s->remote_fd, (char*)cap_buffer + PCAP_ICMP_SKIP, cap_data.caplen - PCAP_ICMP_SKIP, 0, (const struct sockaddr *)&s->remote_addr, IP_SIZE);
+            
+            if (res < 0)
+            {
+                perror("failed to send UDP packet");
+            }
 
             s->connected = 1;
             continue;
@@ -117,6 +136,11 @@ void icmp_udp_server_to_remote_pcap_loop(struct session *s)
         s->sequence = ntohs(*((unsigned short*)&cap_buffer[ETHHDR_LEN + IPHDR_LEN + ICMP_SEQ_OFFSET]));
 
         res = sendto(s->remote_fd, (char*)cap_buffer + PCAP_ICMP_SKIP, cap_data.caplen - PCAP_ICMP_SKIP, 0, (const struct sockaddr *)&s->remote_addr, IP_SIZE);
+
+        if (res < 0)
+        {
+            perror("failed to send UDP packet");
+        }
     }
 }
 
@@ -124,10 +148,12 @@ void icmp_udp_remote_to_server_loop(struct session *s)
 {
     int res;
     char buffer[MTU_SIZE];
-    socklen_t addrlen;
+    socklen_t addrlen = IP_SIZE;
 
     while (run)
     {
+        // udp -> icmp
+
         if (!s->connected)
         {
             sleep(1);
@@ -156,6 +182,11 @@ void icmp_udp_remote_to_server_loop(struct session *s)
         *((unsigned short*)&buffer[2]) = ip_checksum((char*)&buffer, msglen + ICMP_LEN);
 
         res = sendto(s->server_fd, (char*)buffer, msglen + ICMP_LEN, 0, (const struct sockaddr *)&s->client_addr, IP_SIZE);
+
+        if (res < 0)
+        {
+            perror("failed to send ICMP packet");
+        }
     }
 }
 

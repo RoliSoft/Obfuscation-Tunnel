@@ -70,6 +70,12 @@ static void sig_handler(int _)
 {
     (void)_;
 
+    if (run == 0)
+    {
+        kill(getpid(), SIGKILL);
+        return;
+    }
+
     run = 0;
     printf("Exiting...\n");
 
@@ -198,6 +204,38 @@ static inline unsigned short ip_checksum(char* data, unsigned int length)
     return htons(~acc);
 }
 
+void print_ip(struct sockaddr_in *sockaddr)
+{
+    if (sockaddr->sin_family != AF_INET)
+    {
+        return;
+    }
+
+    char addrstr[INET_ADDRSTRLEN];
+    if (inet_ntop(sockaddr->sin_family, &sockaddr->sin_addr, (char*)&addrstr, sizeof(*sockaddr)) == NULL)
+    {
+        return;
+    }
+
+    printf("%s", addrstr);
+}
+
+void print_ip6(struct sockaddr_in6 *sockaddr)
+{
+    if (sockaddr->sin6_family != AF_INET6)
+    {
+        return;
+    }
+
+    char addrstr[INET6_ADDRSTRLEN];
+    if (inet_ntop(sockaddr->sin6_family, &sockaddr->sin6_addr, (char*)&addrstr, sizeof(*sockaddr)) == NULL)
+    {
+        return;
+    }
+
+    printf("%s", addrstr);
+}
+
 void hexdump(const void* data, size_t size)
 {
 	char ascii[17];
@@ -245,12 +283,33 @@ void hexdump(const void* data, size_t size)
 	}
 }
 
+int resolve_host(const char *addr, struct sockaddr_in *sockaddr)
+{
+    int res;
+    struct addrinfo hints, *addrs;
+
+    memset(&hints, 0, sizeof(hints));
+    hints.ai_family = AF_INET;
+    hints.ai_flags = AI_ALL;
+
+    if ((res = getaddrinfo(addr, NULL, &hints, &addrs)) != 0)
+    {
+        fprintf(stderr, "Failed to resolve host %s: %s\n", addr, gai_strerror(res));
+        return res;
+    }
+
+    memcpy(sockaddr, addrs->ai_addr, addrs->ai_addrlen);
+    freeaddrinfo(addrs);
+
+    return res;
+}
+
 void print_help(char* argv[])
 {
     printf("usage: %s -r addr:port [args]\narguments:\n\n", argv[0]);
     printf("   -r addr:port\tRemote host to tunnel packets to.\n");
     printf("   -l addr:port\tLocal listening address and port.\n   \t\t  Optional, defaults to 127.0.0.1:8080\n");
-    printf("   -m mode\tOperation mode. Possible values:\n   \t\t  uu - UDP-to-UDP (Default)\n   \t\t  ut - UDP-to-TCP\n   \t\t  tu - TCP-to-UDP\n   \t\t  ui - UDP-to-ICMP (Requires root)   \t\t  tu - ICMP-to-UDP (Requires root)\n\n");
+    printf("   -m mode\tOperation mode. Possible values:\n   \t\t  uu - UDP-to-UDP (Default)\n   \t\t  ut - UDP-to-TCP\n   \t\t  tu - TCP-to-UDP\n   \t\t  ui - UDP-to-ICMP (Requires root)\n   \t\t  tu - ICMP-to-UDP (Requires root)\n");
     printf("   -p\t\tUse PCAP, only applicable to ICMP tunnels, highly recommended.\n");
     printf("   -o\t\tEnable generic header obfuscation.\n");
     printf("   -v\t\tDetailed logging at the expense of decreased throughput.\n");
@@ -259,8 +318,7 @@ void print_help(char* argv[])
 
 int parse_arguments(int argc, char* argv[], struct session *s)
 {
-    char *token;
-    struct hostent *localhost = NULL, *remotehost = NULL;
+    char *token, *localhost = NULL, *remotehost = NULL;
 
     if (argc == 1)
     {
@@ -321,71 +379,64 @@ int parse_arguments(int argc, char* argv[], struct session *s)
                 break;
             
             case 'l':
-                token = strtok(optarg, ":");
-                localhost = gethostbyname(token);
-
-                if (localhost == NULL)
-                {
-                    perror("failed to resolve local host");
-                    return EXIT_FAILURE;
-                }
-
-                token = strtok(NULL, ":");
-                if (token != NULL)
-                {
-                    s->local_port = strtoul(token, NULL, 0);
-                }
-                else
-                {
-                    s->local_port = 0;
-                }
-
-                memset(&s->local_addr, 0, sizeof(s->local_addr));
-                memcpy(&(s->local_addr.sin_addr), localhost->h_addr_list[0], localhost->h_length);
-                s->local_addr.sin_family = AF_INET;
-                s->local_addr.sin_port = htons(s->local_port);
+                localhost = optarg;
                 break;
 
             case 'r':
-                token = strtok(optarg, ":");
-                remotehost = gethostbyname(token);
-
-                if (remotehost == NULL)
-                {
-                    perror("failed to resolve remote host");
-                    return EXIT_FAILURE;
-                }
-
-                token = strtok(NULL, ":");
-                if (token != NULL)
-                {
-                    s->remote_port = strtoul(token, NULL, 0);
-                }
-                else
-                {
-                    s->remote_port = 0;
-                }
-
-                memset(&s->remote_addr, 0, sizeof(s->remote_addr));
-                memcpy(&(s->remote_addr.sin_addr), remotehost->h_addr_list[0], remotehost->h_length);
-                s->remote_addr.sin_family = AF_INET;
-                s->remote_addr.sin_port = htons(s->remote_port);
+                remotehost = optarg;
                 break;
         }
     }
 
-    if (remotehost == NULL)
+    if (remotehost != NULL)
+    {
+        token = strtok(remotehost, ":");
+        if (resolve_host(token, &s->remote_addr) != 0)
+        {
+            return EXIT_FAILURE;
+        }
+
+        token = strtok(NULL, ":");
+        s->remote_port = token != NULL
+            ? strtoul(token, NULL, 0)
+            : 0;
+
+        s->remote_addr.sin_port = htons(s->remote_port);
+    }
+    else
     {
         fprintf(stderr, "you need to declare a remote host and port with -r\n");
         return EXIT_FAILURE;
     }
 
-    if (localhost == NULL)
+    if (localhost != NULL)
     {
-        memset(&s->local_addr, 0, sizeof(s->local_addr));
-        s->local_addr.sin_family = AF_INET;
+        token = strtok(localhost, ":");
+        if (resolve_host(token, &s->local_addr) != 0)
+        {
+            return EXIT_FAILURE;
+        }
+
+        token = strtok(NULL, ":");
+        s->local_port = token != NULL
+            ? strtoul(token, NULL, 0)
+            : 0;
+
         s->local_addr.sin_port = htons(s->local_port);
-        inet_pton(AF_INET, "127.0.0.1", &(s->local_addr.sin_addr));
+    }
+    else
+    {
+        if (s->mode == MODE_ICMP_UDP)
+        {
+            resolve_host("0.0.0.0", &s->local_addr);
+        }
+        else
+        {
+            resolve_host("127.0.0.1", &s->local_addr);
+        }
+
+        s->local_addr.sin_port = htons(s->local_port);
+
     }
 
     return -1;

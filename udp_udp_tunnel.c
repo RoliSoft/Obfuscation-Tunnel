@@ -4,7 +4,7 @@ void udp_udp_server_to_remote_loop(struct session *s)
 {
     int res;
     char buffer[MTU_SIZE];
-    socklen_t addrlen;
+    socklen_t addrlen = IP_SIZE;
 
     while (run)
     {
@@ -24,14 +24,19 @@ void udp_udp_server_to_remote_loop(struct session *s)
                 continue;
             }
 
-            char clientaddrstr[INET_ADDRSTRLEN];
-            inet_ntop(AF_INET, &(s->client_addr.sin_addr), clientaddrstr, INET_ADDRSTRLEN);
-            printf("Client connected from %s:%d\n", clientaddrstr, ntohs(s->client_addr.sin_port));
+            printf("Client connected from ");
+            print_ip(&s->client_addr);
+            printf(":%d\n", ntohs(s->client_addr.sin_port));
 
             if (s->verbose) printf("Received %d bytes from client\n", msglen);
             if (s->obfuscate) obfuscate_message(buffer, msglen);
 
             res = sendto(s->remote_fd, (char*)buffer, msglen, 0, (const struct sockaddr *)&s->remote_addr, IP_SIZE);
+
+            if (res < 0)
+            {
+                perror("failed to send UDP packet");
+            }
 
             s->connected = 1;
             continue;
@@ -53,6 +58,11 @@ void udp_udp_server_to_remote_loop(struct session *s)
         if (s->obfuscate) obfuscate_message(buffer, msglen);
 
         res = sendto(s->remote_fd, (char*)buffer, msglen, 0, (const struct sockaddr *)&s->remote_addr, IP_SIZE);
+
+        if (res < 0)
+        {
+            perror("failed to send UDP packet");
+        }
     }
 }
 
@@ -60,7 +70,7 @@ void udp_udp_remote_to_server_loop(struct session *s)
 {
     int res;
     char buffer[MTU_SIZE];
-    socklen_t addrlen;
+    socklen_t addrlen = IP_SIZE;
 
     while (run)
     {
@@ -86,6 +96,11 @@ void udp_udp_remote_to_server_loop(struct session *s)
         if (s->obfuscate) obfuscate_message(buffer, msglen);
 
         res = sendto(s->server_fd, (char*)buffer, msglen, 0, (const struct sockaddr *)&s->client_addr, IP_SIZE);
+
+        if (res < 0)
+        {
+            perror("failed to send UDP packet");
+        }
     }
 }
 

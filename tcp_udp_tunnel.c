@@ -41,6 +41,11 @@ int tcp_udp_client_to_remote_loop(struct session *s)
         if (s->obfuscate) obfuscate_message(buffer, readsize);
 
         res = sendto(s->remote_fd, (char*)buffer, readsize, 0, (const struct sockaddr *)&s->remote_addr, IP_SIZE);
+
+        if (res < 0)
+        {
+            perror("failed to send UDP packet");
+        }
     }
 
     return EXIT_SUCCESS;
@@ -50,7 +55,7 @@ int tcp_udp_remote_to_client_loop(struct session *s)
 {
     int res;
     char buffer[MTU_SIZE];
-    socklen_t addrlen;
+    socklen_t addrlen = IP_SIZE;
 
     while (run)
     {
@@ -81,6 +86,11 @@ int tcp_udp_remote_to_client_loop(struct session *s)
         }
 
         res = write(s->client_fd, (char*)buffer + sizediff, msglen + sizelen);
+
+        if (res < 0)
+        {
+            perror("failed to send TCP packet");
+        }
     }
 
     return EXIT_SUCCESS;
@@ -135,9 +145,9 @@ int tcp_udp_tunnel(struct session *s)
 
     sockets[2] = s->client_fd;
 
-    char clientaddrstr[INET_ADDRSTRLEN];
-    inet_ntop(AF_INET, &(s->client_addr.sin_addr), clientaddrstr, INET_ADDRSTRLEN);
-    printf("Client connected from %s:%d\n", clientaddrstr, ntohs(s->client_addr.sin_port));
+    printf("Client connected from ");
+    print_ip(&s->client_addr);
+    printf(":%d\n", ntohs(s->client_addr.sin_port));
 
     int i = 1;
     setsockopt(s->client_fd, IPPROTO_TCP, TCP_NODELAY, (void *)&i, sizeof(i));
