@@ -15,6 +15,12 @@
 #include <signal.h>
 #include <pthread.h>
 #include <errno.h>
+
+#ifdef AF_PACKET
+    // Linux
+    #include <linux/filter.h>
+#endif
+
 #include <pcap/pcap.h>
 
 #define MODE_UDP_UDP 0

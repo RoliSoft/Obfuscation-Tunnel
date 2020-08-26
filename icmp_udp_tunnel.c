@@ -6,6 +6,10 @@ void icmp_udp_server_to_remote_loop(struct session *s)
     char buffer[MTU_SIZE];
     socklen_t addrlen = IP_SIZE;
 
+#ifndef AF_PACKET
+    struct sockaddr_in temp_addr;
+#endif
+
     while (run)
     {
         // icmp -> udp
@@ -14,7 +18,13 @@ void icmp_udp_server_to_remote_loop(struct session *s)
         {
             if (s->verbose) printf("Waiting for first packet from client...\n");
 
-            socklen_t msglen = recvfrom(s->server_fd, (char*)buffer, MTU_SIZE, 0, (struct sockaddr*)&s->client_addr, &addrlen);
+            socklen_t msglen = recvfrom(s->server_fd, (char*)buffer, MTU_SIZE, 0, (struct sockaddr*)&
+#ifdef AF_PACKET
+                s->client_addr
+#else
+                temp_addr
+#endif
+                , &addrlen);
 
             if (msglen == -1)
             {
@@ -26,9 +36,19 @@ void icmp_udp_server_to_remote_loop(struct session *s)
                 continue;
             }
 
-            char clientaddrstr[INET_ADDRSTRLEN];
-            inet_ntop(AF_INET, &(s->client_addr.sin_addr), clientaddrstr, INET_ADDRSTRLEN);
-            printf("Client connected from %s\n", clientaddrstr);
+#ifndef AF_PACKET
+            if ((unsigned char)buffer[IPHDR_LEN] != 0x08 || (unsigned char)buffer[4 + IPHDR_LEN] != 0x13 || (unsigned char)buffer[5 + IPHDR_LEN] != 0x37)
+            {
+                continue;
+            }
+
+            // make sure the return address is not overwritten if not tunnel packet
+            s->client_addr = temp_addr;
+#endif
+
+            printf("Client connected from ");
+            print_ip(&s->client_addr);
+            printf("\n");
 
             if (s->verbose) printf("Received %d bytes from client\n", msglen - ICMP_SKIP);
             if (s->obfuscate) obfuscate_message(buffer + ICMP_SKIP, msglen - ICMP_SKIP);
@@ -46,7 +66,13 @@ void icmp_udp_server_to_remote_loop(struct session *s)
             continue;
         }
 
-        socklen_t msglen = recvfrom(s->server_fd, (char*)buffer, MTU_SIZE, 0, (struct sockaddr*)&s->client_addr, &addrlen);
+        socklen_t msglen = recvfrom(s->server_fd, (char*)buffer, MTU_SIZE, 0, (struct sockaddr*)&
+#ifdef AF_PACKET
+            s->client_addr
+#else
+            temp_addr
+#endif
+            , &addrlen);
 
         if (msglen == -1)
         {
@@ -250,6 +276,41 @@ int icmp_udp_tunnel(struct session *s)
             fprintf(stderr, "Can't install filter %s: %s\n", bpf_filter, pcap_geterr(s->cap_ptr));
             return EXIT_FAILURE;
         }
+    }
+    else
+    {
+#ifdef AF_PACKET
+        // ip[20] == 0x08 && ip[24] == 0x13 && ip[25] == 0x37
+        // in order to offset the presence of an ethernet header assumed by pcap_compile,
+        // we'll change the ip[] to ether[]
+        
+        struct bpf_program bpf;
+        s->cap_ptr = pcap_open_dead(DLT_EN10MB, MTU_SIZE);
+
+        static const char bpf_filter[] = "ether[20] == 0x08 && ether[24] == 0x13 && ether[25] == 0x37";
+        if (pcap_compile(s->cap_ptr, &bpf, bpf_filter, 0, PCAP_NETMASK_UNKNOWN) == -1)
+        {
+            fprintf(stderr, "Can't parse filter %s: %s\n", bpf_filter, pcap_geterr(s->cap_ptr));
+            return EXIT_FAILURE;
+        }
+
+        struct sock_fprog linux_bpf = {
+            .len = bpf.bf_len,
+            .filter = (struct sock_filter *)bpf.bf_insns,
+        };
+
+        if(setsockopt(s->server_fd, SOL_SOCKET, SO_ATTACH_FILTER, &linux_bpf, sizeof(linux_bpf)) != 0)
+        {
+            perror("Failed to set BPF filter on raw socket, connection may be unstable.");
+        }
+
+        pcap_close(s->cap_ptr);
+#else
+        // BPF program cannot be attached to a raw socket in BSD,
+        // reimplementing /dev/bpf* would essentially just be reimplementing libpcap
+
+        printf("Packet filtering for BSD not implemented, use -p if connection is unstable.\n");
+#endif
     }
 
     sockets[0] = s->server_fd;
