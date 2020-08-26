@@ -76,7 +76,7 @@ void icmp_udp_server_to_remote_pcap_loop(struct session *s)
 {
     int res;
     const u_char *cap_buffer;
-    struct pcap_pkthdr cap_data;
+    struct pcap_pkthdr *cap_data;
 
     while (run)
     {
@@ -86,11 +86,20 @@ void icmp_udp_server_to_remote_pcap_loop(struct session *s)
         {
             if (s->verbose) printf("Waiting for first packet from client...\n");
 
-            cap_buffer = pcap_next(s->cap_ptr, &cap_data);
+            res = pcap_next_ex(s->cap_ptr, &cap_data, &cap_buffer);
 
-            if (cap_buffer == NULL)
+            if (res == 0)
             {
                 sleep(1);
+                continue;
+            }
+            else if (res < 0)
+            {
+                if (run)
+                {
+                    pcap_perror(s->cap_ptr, "failed to read ICMP packet");
+                }
+
                 continue;
             }
 
@@ -102,10 +111,10 @@ void icmp_udp_server_to_remote_pcap_loop(struct session *s)
             print_ip(&s->client_addr);
             printf("\n");
             
-            if (s->verbose) printf("Received %d bytes from client\n", cap_data.caplen - PCAP_ICMP_SKIP);
-            if (s->obfuscate) obfuscate_message((char*)cap_buffer + PCAP_ICMP_SKIP, cap_data.caplen - PCAP_ICMP_SKIP);
+            if (s->verbose) printf("Received %d bytes from client\n", cap_data->caplen - PCAP_ICMP_SKIP);
+            if (s->obfuscate) obfuscate_message((char*)cap_buffer + PCAP_ICMP_SKIP, cap_data->caplen - PCAP_ICMP_SKIP);
 
-            res = sendto(s->remote_fd, (char*)cap_buffer + PCAP_ICMP_SKIP, cap_data.caplen - PCAP_ICMP_SKIP, 0, (const struct sockaddr *)&s->remote_addr, IP_SIZE);
+            res = sendto(s->remote_fd, (char*)cap_buffer + PCAP_ICMP_SKIP, cap_data->caplen - PCAP_ICMP_SKIP, 0, (const struct sockaddr *)&s->remote_addr, IP_SIZE);
             
             if (res < 0)
             {
@@ -116,13 +125,13 @@ void icmp_udp_server_to_remote_pcap_loop(struct session *s)
             continue;
         }
 
-        cap_buffer = pcap_next(s->cap_ptr, &cap_data);
+        res = pcap_next_ex(s->cap_ptr, &cap_data, &cap_buffer);
 
-        if (cap_buffer == NULL)
+        if (res < 1)
         {
-            if (run)
+            if (run && res < 0)
             {
-                perror("failed to read ICMP packet");
+                pcap_perror(s->cap_ptr, "failed to read ICMP packet");
             }
 
             continue;
@@ -130,12 +139,12 @@ void icmp_udp_server_to_remote_pcap_loop(struct session *s)
 
         s->client_addr.sin_addr = *((struct in_addr*)((char*)cap_buffer + ETHHDR_LEN + IPHDR_SRC_OFFSET));
 
-        if (s->verbose) printf("Received %d bytes from client\n", cap_data.caplen - PCAP_ICMP_SKIP);
-        if (s->obfuscate) obfuscate_message((char*)cap_buffer + PCAP_ICMP_SKIP, cap_data.caplen - PCAP_ICMP_SKIP);
+        if (s->verbose) printf("Received %d bytes from client\n", cap_data->caplen - PCAP_ICMP_SKIP);
+        if (s->obfuscate) obfuscate_message((char*)cap_buffer + PCAP_ICMP_SKIP, cap_data->caplen - PCAP_ICMP_SKIP);
 
         s->sequence = ntohs(*((unsigned short*)&cap_buffer[ETHHDR_LEN + IPHDR_LEN + ICMP_SEQ_OFFSET]));
 
-        res = sendto(s->remote_fd, (char*)cap_buffer + PCAP_ICMP_SKIP, cap_data.caplen - PCAP_ICMP_SKIP, 0, (const struct sockaddr *)&s->remote_addr, IP_SIZE);
+        res = sendto(s->remote_fd, (char*)cap_buffer + PCAP_ICMP_SKIP, cap_data->caplen - PCAP_ICMP_SKIP, 0, (const struct sockaddr *)&s->remote_addr, IP_SIZE);
 
         if (res < 0)
         {
