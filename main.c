@@ -4,6 +4,8 @@
 #include "tcp_udp_tunnel.c"
 #include "udp_icmp_tunnel.c"
 #include "icmp_udp_tunnel.c"
+#include "udp_icmp6_tunnel.c"
+#include "icmp6_udp_tunnel.c"
 
 int main(int argc, char* argv[])
 {
@@ -34,5 +36,11 @@ int main(int argc, char* argv[])
 
         case MODE_ICMP_UDP:
             return icmp_udp_tunnel(&s);
+
+        case MODE_UDP_ICMP6:
+            return udp_icmp6_tunnel(&s);
+
+        case MODE_ICMP6_UDP:
+            return icmp6_udp_tunnel(&s);
     }
 }

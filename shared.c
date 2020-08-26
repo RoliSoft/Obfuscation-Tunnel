@@ -28,16 +28,22 @@
 #define MODE_TCP_UDP 2
 #define MODE_UDP_ICMP 3
 #define MODE_ICMP_UDP 4
+#define MODE_UDP_ICMP6 5
+#define MODE_ICMP6_UDP 6
 #define MTU_SIZE 1500
 
-#define IP_SIZE sizeof(struct sockaddr_in)
+#define IP_SIZE sizeof(struct sockaddr_in6)
 #define ETHHDR_LEN 14
 #define IPHDR_LEN 20
 #define IPHDR_SRC_OFFSET 12
+#define IP6HDR_LEN 40
+#define IP6HDR_SRC_OFFSET 8
 #define ICMP_LEN 8
 #define ICMP_SEQ_OFFSET 6
 #define ICMP_SKIP (IPHDR_LEN + ICMP_LEN)
+#define ICMP6_SKIP ICMP_LEN
 #define PCAP_ICMP_SKIP (ETHHDR_LEN + IPHDR_LEN + ICMP_LEN)
+#define PCAP_ICMP6_SKIP (ETHHDR_LEN + IP6HDR_LEN + ICMP_LEN)
 
 #define min(X, Y) (((X) < (Y)) ? (X) : (Y))
 
@@ -54,16 +60,19 @@ struct session
 
     // local server configured with -l
     struct sockaddr_in local_addr;
+    char __local_addr_pad[sizeof(struct sockaddr_in6) - sizeof(struct sockaddr_in)];
     int local_port;
     int server_fd;
 
     // remote gateway or end server configured with -r
     struct sockaddr_in remote_addr;
+    char __remote_addr_pad[sizeof(struct sockaddr_in6) - sizeof(struct sockaddr_in)];
     int remote_port;
     int remote_fd;
 
     // address of the connecting client to local server
     struct sockaddr_in client_addr;
+    char __client_addr_pad[sizeof(struct sockaddr_in6) - sizeof(struct sockaddr_in)];
     int client_fd;
 
     // protocol-dependent stateful variables
@@ -304,6 +313,29 @@ int resolve_host(const char *addr, struct sockaddr_in *sockaddr)
         return res;
     }
 
+    memset(sockaddr, 0, sizeof(*sockaddr));
+    memcpy(sockaddr, addrs->ai_addr, addrs->ai_addrlen);
+    freeaddrinfo(addrs);
+
+    return res;
+}
+
+int resolve_host6(const char *addr, struct sockaddr_in6 *sockaddr)
+{
+    int res;
+    struct addrinfo hints, *addrs;
+
+    memset(&hints, 0, sizeof(hints));
+    hints.ai_family = AF_INET6;
+    hints.ai_flags = AI_ALL;
+
+    if ((res = getaddrinfo(addr, NULL, &hints, &addrs)) != 0)
+    {
+        fprintf(stderr, "Failed to resolve host %s: %s\n", addr, gai_strerror(res));
+        return res;
+    }
+
+    memset(sockaddr, 0, sizeof(*sockaddr));
     memcpy(sockaddr, addrs->ai_addr, addrs->ai_addrlen);
     freeaddrinfo(addrs);
 
@@ -315,7 +347,7 @@ void print_help(char* argv[])
     printf("usage: %s -r addr:port [args]\narguments:\n\n", argv[0]);
     printf("   -r addr:port\tRemote host to tunnel packets to.\n");
     printf("   -l addr:port\tLocal listening address and port.\n   \t\t  Optional, defaults to 127.0.0.1:8080\n");
-    printf("   -m mode\tOperation mode. Possible values:\n   \t\t  uu - UDP-to-UDP (Default)\n   \t\t  ut - UDP-to-TCP\n   \t\t  tu - TCP-to-UDP\n   \t\t  ui - UDP-to-ICMP (Requires root)\n   \t\t  tu - ICMP-to-UDP (Requires root)\n");
+    printf("   -m mode\tOperation mode. Possible values:\n   \t\t  uu - UDP-to-UDP (Default)\n   \t\t  ut - UDP-to-TCP\n   \t\t  tu - TCP-to-UDP\n   \t\t  ui - UDP-to-ICMP (Requires root)\n   \t\t  iu - ICMP-to-UDP (Requires root)\n   \t\t  ui6 - UDP-to-ICMPv6 (Requires root)\n   \t\t  i6u - ICMPv6-to-UDP (Requires root)\n");
     printf("   -p\t\tUse PCAP, only applicable to ICMP tunnels, highly recommended.\n");
     printf("   -o\t\tEnable generic header obfuscation.\n");
     printf("   -v\t\tDetailed logging at the expense of decreased throughput.\n");
@@ -365,6 +397,14 @@ int parse_arguments(int argc, char* argv[], struct session *s)
                 {
                     s->mode = MODE_ICMP_UDP;
                 }
+                else if (strcmp(optarg, "ui6") == 0)
+                {
+                    s->mode = MODE_UDP_ICMP6;
+                }
+                else if (strcmp(optarg, "i6u") == 0)
+                {
+                    s->mode = MODE_ICMP6_UDP;
+                }
                 else
                 {
                     fprintf(stderr, "unrecognized operating mode\n");
@@ -396,18 +436,28 @@ int parse_arguments(int argc, char* argv[], struct session *s)
 
     if (remotehost != NULL)
     {
-        token = strtok(remotehost, ":");
-        if (resolve_host(token, &s->remote_addr) != 0)
+        if (s->mode == MODE_UDP_ICMP6)
         {
-            return EXIT_FAILURE;
+            if (resolve_host6(remotehost, (struct sockaddr_in6*)&s->remote_addr) != 0)
+            {
+                return EXIT_FAILURE;
+            }
         }
+        else
+        {
+            token = strtok(remotehost, ":");
+            if (resolve_host(token, &s->remote_addr) != 0)
+            {
+                return EXIT_FAILURE;
+            }
 
-        token = strtok(NULL, ":");
-        s->remote_port = token != NULL
-            ? strtoul(token, NULL, 0)
-            : 0;
+            token = strtok(NULL, ":");
+            s->remote_port = token != NULL
+                ? strtoul(token, NULL, 0)
+                : 0;
 
-        s->remote_addr.sin_port = htons(s->remote_port);
+            s->remote_addr.sin_port = htons(s->remote_port);
+        }
     }
     else
     {
@@ -417,32 +467,47 @@ int parse_arguments(int argc, char* argv[], struct session *s)
 
     if (localhost != NULL)
     {
-        token = strtok(localhost, ":");
-        if (resolve_host(token, &s->local_addr) != 0)
+        if (s->mode == MODE_ICMP6_UDP)
         {
-            return EXIT_FAILURE;
-        }
-
-        token = strtok(NULL, ":");
-        s->local_port = token != NULL
-            ? strtoul(token, NULL, 0)
-            : 0;
-
-        s->local_addr.sin_port = htons(s->local_port);
-    }
-    else
-    {
-        if (s->mode == MODE_ICMP_UDP)
-        {
-            resolve_host("0.0.0.0", &s->local_addr);
+            if (resolve_host6(localhost, (struct sockaddr_in6*)&s->local_addr) != 0)
+            {
+                return EXIT_FAILURE;
+            }
         }
         else
         {
-            resolve_host("127.0.0.1", &s->local_addr);
+            token = strtok(localhost, ":");
+            if (resolve_host(token, &s->local_addr) != 0)
+            {
+                return EXIT_FAILURE;
+            }
+
+            token = strtok(NULL, ":");
+            s->local_port = token != NULL
+                ? strtoul(token, NULL, 0)
+                : 0;
+
+            s->local_addr.sin_port = htons(s->local_port);
+        }
+    }
+    else
+    {
+        switch (s->mode)
+        {
+            case MODE_ICMP_UDP:
+                resolve_host("0.0.0.0", &s->local_addr);
+                break;
+            
+            case MODE_ICMP6_UDP:
+                resolve_host6("::", (struct sockaddr_in6*)&s->local_addr);
+                break;
+            
+            default:
+                resolve_host("127.0.0.1", &s->local_addr);
+                break;
         }
 
         s->local_addr.sin_port = htons(s->local_port);
-
     }
 
     return -1;

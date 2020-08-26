@@ -1,13 +1,13 @@
 #include "shared.c"
 
-void icmp_udp_server_to_remote_loop(struct session *s)
+void icmp6_udp_server_to_remote_loop(struct session *s)
 {
     int res;
     char buffer[MTU_SIZE];
     socklen_t addrlen = IP_SIZE;
 
 #ifndef AF_PACKET
-    struct sockaddr_in temp_addr;
+    struct sockaddr_in6 temp_addr;
 #endif
 
     while (run)
@@ -37,25 +37,25 @@ void icmp_udp_server_to_remote_loop(struct session *s)
             }
 
 #ifndef AF_PACKET
-            if ((unsigned char)buffer[IPHDR_LEN] != 0x08 || (unsigned char)buffer[4 + IPHDR_LEN] != 0x13 || (unsigned char)buffer[5 + IPHDR_LEN] != 0x37)
+            if ((unsigned char)buffer[0] != 0x80 || (unsigned char)buffer[4] != 0x13 || (unsigned char)buffer[5] != 0x37)
             {
                 continue;
             }
 
             // make sure the return address is not overwritten if not tunnel packet
-            s->client_addr = temp_addr;
+            *(struct sockaddr_in6*)&s->client_addr = temp_addr;
 #endif
 
             printf("Client connected from ");
-            print_ip(&s->client_addr);
+            print_ip6((struct sockaddr_in6*)&s->client_addr);
             printf("\n");
 
-            if (s->verbose) printf("Received %d bytes from client\n", msglen - ICMP_SKIP);
-            if (s->obfuscate) obfuscate_message(buffer + ICMP_SKIP, msglen - ICMP_SKIP);
+            if (s->verbose) printf("Received %d bytes from client\n", msglen - ICMP6_SKIP);
+            if (s->obfuscate) obfuscate_message(buffer + ICMP6_SKIP, msglen - ICMP6_SKIP);
 
-            s->sequence = *((unsigned short*)&buffer[6 + IPHDR_LEN]);
+            s->sequence = *((unsigned short*)&buffer[ICMP_SEQ_OFFSET]);
 
-            res = sendto(s->remote_fd, (char*)buffer + ICMP_SKIP, msglen - ICMP_SKIP, 0, (const struct sockaddr *)&s->remote_addr, IP_SIZE);
+            res = sendto(s->remote_fd, (char*)buffer + ICMP6_SKIP, msglen - ICMP6_SKIP, 0, (const struct sockaddr *)&s->remote_addr, IP_SIZE);
             
             if (res < 0)
             {
@@ -85,21 +85,21 @@ void icmp_udp_server_to_remote_loop(struct session *s)
         }
 
 #ifndef AF_PACKET
-        if ((unsigned char)buffer[IPHDR_LEN] != 0x08 || (unsigned char)buffer[4 + IPHDR_LEN] != 0x13 || (unsigned char)buffer[5 + IPHDR_LEN] != 0x37)
-        {
-            continue;
-        }
+            if ((unsigned char)buffer[0] != 0x80 || (unsigned char)buffer[4] != 0x13 || (unsigned char)buffer[5] != 0x37)
+            {
+                continue;
+            }
 
-        // make sure the return address is not overwritten if not tunnel packet
-        s->client_addr = temp_addr;
+            // make sure the return address is not overwritten if not tunnel packet
+            *(struct sockaddr_in6*)&s->client_addr = temp_addr;
 #endif
 
-        if (s->verbose) printf("Received %d bytes from client\n", msglen - ICMP_SKIP);
-        if (s->obfuscate) obfuscate_message(buffer + ICMP_SKIP, msglen - ICMP_SKIP);
+        if (s->verbose) printf("Received %d bytes from client\n", msglen - ICMP6_SKIP);
+        if (s->obfuscate) obfuscate_message(buffer + ICMP6_SKIP, msglen - ICMP6_SKIP);
 
-        s->sequence = ntohs(*((unsigned short*)&buffer[IPHDR_LEN + ICMP_SEQ_OFFSET]));
+        s->sequence = ntohs(*((unsigned short*)&buffer[ICMP_SEQ_OFFSET]));
 
-        res = sendto(s->remote_fd, (char*)buffer + ICMP_SKIP, msglen - ICMP_SKIP, 0, (const struct sockaddr *)&s->remote_addr, IP_SIZE);
+        res = sendto(s->remote_fd, (char*)buffer + ICMP6_SKIP, msglen - ICMP6_SKIP, 0, (const struct sockaddr *)&s->remote_addr, IP_SIZE);
         
         if (res < 0)
         {
@@ -108,7 +108,7 @@ void icmp_udp_server_to_remote_loop(struct session *s)
     }
 }
 
-void icmp_udp_server_to_remote_pcap_loop(struct session *s)
+void icmp6_udp_server_to_remote_pcap_loop(struct session *s)
 {
     int res;
     const u_char *cap_buffer;
@@ -139,18 +139,21 @@ void icmp_udp_server_to_remote_pcap_loop(struct session *s)
                 continue;
             }
 
-            memset(&s->client_addr, 0, sizeof(s->client_addr));
-            s->client_addr.sin_family = AF_INET;
-            s->client_addr.sin_addr = *((struct in_addr*)((char*)cap_buffer + ETHHDR_LEN + IPHDR_SRC_OFFSET));
+            memset(&s->client_addr, 0, sizeof(struct sockaddr_in6));
+            ((struct sockaddr_in6*)&s->client_addr)->sin6_family = AF_INET6;
+            ((struct sockaddr_in6*)&s->client_addr)->sin6_flowinfo = 0;
+            ((struct sockaddr_in6*)&s->client_addr)->sin6_addr = *((struct in6_addr*)(cap_buffer + ETHHDR_LEN + IP6HDR_SRC_OFFSET));
 
             printf("Client connected from ");
-            print_ip(&s->client_addr);
+            print_ip6((struct sockaddr_in6*)&s->client_addr);
             printf("\n");
             
-            if (s->verbose) printf("Received %d bytes from client\n", cap_data->caplen - PCAP_ICMP_SKIP);
-            if (s->obfuscate) obfuscate_message((char*)cap_buffer + PCAP_ICMP_SKIP, cap_data->caplen - PCAP_ICMP_SKIP);
+            if (s->verbose) printf("Received %d bytes from client\n", cap_data->caplen - PCAP_ICMP6_SKIP);
+            if (s->obfuscate) obfuscate_message((char*)cap_buffer + PCAP_ICMP6_SKIP, cap_data->caplen - PCAP_ICMP6_SKIP);
 
-            res = sendto(s->remote_fd, (char*)cap_buffer + PCAP_ICMP_SKIP, cap_data->caplen - PCAP_ICMP_SKIP, 0, (const struct sockaddr *)&s->remote_addr, IP_SIZE);
+            s->sequence = ntohs(*((unsigned short*)&cap_buffer[ETHHDR_LEN + IP6HDR_LEN + ICMP_SEQ_OFFSET]));
+
+            res = sendto(s->remote_fd, (char*)cap_buffer + PCAP_ICMP6_SKIP, cap_data->caplen - PCAP_ICMP6_SKIP, 0, (const struct sockaddr *)&s->remote_addr, IP_SIZE);
             
             if (res < 0)
             {
@@ -173,14 +176,14 @@ void icmp_udp_server_to_remote_pcap_loop(struct session *s)
             continue;
         }
 
-        s->client_addr.sin_addr = *((struct in_addr*)((char*)cap_buffer + ETHHDR_LEN + IPHDR_SRC_OFFSET));
+        ((struct sockaddr_in6*)&s->client_addr)->sin6_addr = *((struct in6_addr*)(cap_buffer + ETHHDR_LEN + IP6HDR_SRC_OFFSET));
 
-        if (s->verbose) printf("Received %d bytes from client\n", cap_data->caplen - PCAP_ICMP_SKIP);
-        if (s->obfuscate) obfuscate_message((char*)cap_buffer + PCAP_ICMP_SKIP, cap_data->caplen - PCAP_ICMP_SKIP);
+        if (s->verbose) printf("Received %d bytes from client\n", cap_data->caplen - PCAP_ICMP6_SKIP);
+        if (s->obfuscate) obfuscate_message((char*)cap_buffer + PCAP_ICMP6_SKIP, cap_data->caplen - PCAP_ICMP6_SKIP);
 
-        s->sequence = ntohs(*((unsigned short*)&cap_buffer[ETHHDR_LEN + IPHDR_LEN + ICMP_SEQ_OFFSET]));
+        s->sequence = ntohs(*((unsigned short*)&cap_buffer[ETHHDR_LEN + IP6HDR_LEN + ICMP_SEQ_OFFSET]));
 
-        res = sendto(s->remote_fd, (char*)cap_buffer + PCAP_ICMP_SKIP, cap_data->caplen - PCAP_ICMP_SKIP, 0, (const struct sockaddr *)&s->remote_addr, IP_SIZE);
+        res = sendto(s->remote_fd, (char*)cap_buffer + PCAP_ICMP6_SKIP, cap_data->caplen - PCAP_ICMP6_SKIP, 0, (const struct sockaddr *)&s->remote_addr, IP_SIZE);
 
         if (res < 0)
         {
@@ -189,7 +192,7 @@ void icmp_udp_server_to_remote_pcap_loop(struct session *s)
     }
 }
 
-void icmp_udp_remote_to_server_loop(struct session *s)
+void icmp6_udp_remote_to_server_loop(struct session *s)
 {
     int res;
     char buffer[MTU_SIZE];
@@ -220,7 +223,7 @@ void icmp_udp_remote_to_server_loop(struct session *s)
         if (s->verbose) printf("Received %d bytes from remote\n", msglen);
         if (s->obfuscate) obfuscate_message(buffer + ICMP_LEN, msglen);
 
-        *((unsigned short*)&buffer) = 0; // type -> echo reply
+        *((unsigned short*)&buffer) = 0x81; // type -> echo reply
         *((unsigned short*)&buffer[4]) = 0x3713; // identifier
         *((unsigned short*)&buffer[6]) = htons(s->sequence); // sequence
         *((unsigned short*)&buffer[2]) = 0; // zero checksum before calculation
@@ -235,9 +238,9 @@ void icmp_udp_remote_to_server_loop(struct session *s)
     }
 }
 
-int icmp_udp_tunnel(struct session *s)
+int icmp6_udp_tunnel(struct session *s)
 {
-    if ((s->server_fd = socket(AF_INET, SOCK_RAW, IPPROTO_ICMP)) < 0)
+    if ((s->server_fd = socket(AF_INET6, SOCK_RAW, IPPROTO_ICMPV6)) < 0)
     { 
         perror("server socket creation failed");
         return EXIT_FAILURE;
@@ -272,12 +275,25 @@ int icmp_udp_tunnel(struct session *s)
         printf("Device selected for packet capture: %s\n", capdev);
 
         bpf_u_int32 net;
-        char bpf_filter[] = "icmp[icmptype] == icmp-echo and icmp[4] == 0x13 and icmp[5] = 0x37";
         struct bpf_program fp;
+        char bpf_filter[] = "icmp6[icmp6type] == icmp6-echo and icmp6[4] == 0x13 and icmp6[5] = 0x37";
         if (pcap_compile(s->cap_ptr, &fp, bpf_filter, 0, net) == -1)
         {
-            fprintf(stderr, "Can't parse filter %s: %s\n", bpf_filter, pcap_geterr(s->cap_ptr));
-            return EXIT_FAILURE;
+            int still_fails = 1;
+
+            // icmp6[] was added very recently, retry with fallback expression
+
+            char bpf_filter_legacy[] = "icmp6 and ip6[40] == 0x80 and ip6[44] == 0x13 and ip6[45] = 0x37";
+            if (pcap_compile(s->cap_ptr, &fp, bpf_filter_legacy, 0, net) != -1)
+            {
+                still_fails = 0;
+            }
+
+            if (still_fails)
+            {
+                fprintf(stderr, "Can't parse filter %s: %s\n", bpf_filter, pcap_geterr(s->cap_ptr));
+                return EXIT_FAILURE;
+            }
         }
 
         if (pcap_setfilter(s->cap_ptr, &fp) == -1)
@@ -289,14 +305,14 @@ int icmp_udp_tunnel(struct session *s)
     else
     {
 #ifdef AF_PACKET
-        // ip[20] == 0x08 && ip[24] == 0x13 && ip[25] == 0x37
+        // ip6[40] == 0x80 && ip[44] == 0x13 && ip[45] == 0x37
         // in order to offset the presence of an ethernet header assumed by pcap_compile,
-        // we'll change the ip[] to ether[]
+        // we'll change the ip6[] to ether[]
         
         struct bpf_program bpf;
         s->cap_ptr = pcap_open_dead(DLT_EN10MB, MTU_SIZE);
 
-        static const char bpf_filter[] = "ether[20] == 0x08 && ether[24] == 0x13 && ether[25] == 0x37";
+        static const char bpf_filter[] = "ether[0] == 0x80 && ether[4] == 0x13 && ether[5] == 0x37";
         if (pcap_compile(s->cap_ptr, &bpf, bpf_filter, 0, PCAP_NETMASK_UNKNOWN) == -1)
         {
             fprintf(stderr, "Can't parse filter %s: %s\n", bpf_filter, pcap_geterr(s->cap_ptr));
@@ -331,14 +347,14 @@ int icmp_udp_tunnel(struct session *s)
 
     if (s->pcap)
     {
-        pthread_create(&threads[1], NULL, (void*(*)(void*))&icmp_udp_server_to_remote_pcap_loop, (void*)s);
+        pthread_create(&threads[1], NULL, (void*(*)(void*))&icmp6_udp_server_to_remote_pcap_loop, (void*)s);
     }
     else
     {
-        pthread_create(&threads[1], NULL, (void*(*)(void*))&icmp_udp_server_to_remote_loop, (void*)s);
+        pthread_create(&threads[1], NULL, (void*(*)(void*))&icmp6_udp_server_to_remote_loop, (void*)s);
     }
 
-    pthread_create(&threads[0], NULL, (void*(*)(void*))&icmp_udp_remote_to_server_loop, (void*)s);
+    pthread_create(&threads[0], NULL, (void*(*)(void*))&icmp6_udp_remote_to_server_loop, (void*)s);
 
     for (int i = 0; i < sizeof(threads) / sizeof(threads[0]); i++)
     {
