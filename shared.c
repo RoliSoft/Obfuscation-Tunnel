@@ -102,7 +102,7 @@ static void sig_handler(int _)
     run = 0;
     printf("Exiting...\n");
 
-    for (int i = 0; i < sizeof(sockets) / sizeof(int); i++)
+    for (unsigned int i = 0; i < sizeof(sockets) / sizeof(int); i++)
     {
         if (sockets[i] != 0)
         {

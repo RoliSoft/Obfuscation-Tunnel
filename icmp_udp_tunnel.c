@@ -1,6 +1,6 @@
 #include "shared.c"
 
-void icmp_udp_server_to_remote_loop(struct session *s)
+int icmp_udp_server_to_remote_loop(struct session *s)
 {
     int res;
     char buffer[MTU_SIZE];
@@ -14,7 +14,7 @@ void icmp_udp_server_to_remote_loop(struct session *s)
     {
         // icmp -> udp
 
-        socklen_t msglen = recvfrom(s->server_fd, (char*)buffer, MTU_SIZE, 0, (struct sockaddr*)&
+        ssize_t msglen = recvfrom(s->server_fd, (char*)buffer, MTU_SIZE, 0, (struct sockaddr*)&
 #ifdef AF_PACKET
             s->client_addr
 #else
@@ -51,7 +51,7 @@ void icmp_udp_server_to_remote_loop(struct session *s)
             printf("\n");
         }
 
-        if (s->verbose) printf("Received %d bytes from client\n", msglen - ICMP_SKIP);
+        if (s->verbose) printf("Received %zd bytes from client\n", msglen - ICMP_SKIP);
         if (s->obfuscate) obfuscate_message(buffer + ICMP_SKIP, msglen - ICMP_SKIP);
 
         s->sequence = ntohs(*((unsigned short*)&buffer[IPHDR_LEN + ICMP_SEQ_OFFSET]));
@@ -63,10 +63,12 @@ void icmp_udp_server_to_remote_loop(struct session *s)
             perror("failed to send UDP packet");
         }
     }
+
+    return EXIT_SUCCESS;
 }
 
 #if HAVE_PCAP
-void icmp_udp_server_to_remote_pcap_loop(struct session *s)
+int icmp_udp_server_to_remote_pcap_loop(struct session *s)
 {
     int res;
     const u_char *cap_buffer;
@@ -122,10 +124,12 @@ void icmp_udp_server_to_remote_pcap_loop(struct session *s)
             perror("failed to send UDP packet");
         }
     }
+
+    return EXIT_SUCCESS;
 }
 #endif
 
-void icmp_udp_remote_to_server_loop(struct session *s)
+int icmp_udp_remote_to_server_loop(struct session *s)
 {
     int res;
     char buffer[MTU_SIZE];
@@ -141,7 +145,7 @@ void icmp_udp_remote_to_server_loop(struct session *s)
             continue;
         }
 
-        socklen_t msglen = recvfrom(s->remote_fd, (char*)buffer + ICMP_LEN, MTU_SIZE - ICMP_LEN, MSG_WAITALL, (struct sockaddr*)&s->remote_addr, &addrlen);
+        ssize_t msglen = recvfrom(s->remote_fd, (char*)buffer + ICMP_LEN, MTU_SIZE - ICMP_LEN, MSG_WAITALL, (struct sockaddr*)&s->remote_addr, &addrlen);
 
         if (msglen == -1)
         {
@@ -153,7 +157,7 @@ void icmp_udp_remote_to_server_loop(struct session *s)
             continue;
         }
 
-        if (s->verbose) printf("Received %d bytes from remote\n", msglen);
+        if (s->verbose) printf("Received %zd bytes from remote\n", msglen);
         if (s->obfuscate) obfuscate_message(buffer + ICMP_LEN, msglen);
 
         *((unsigned short*)&buffer) = 0; // type -> echo reply
@@ -169,6 +173,8 @@ void icmp_udp_remote_to_server_loop(struct session *s)
             perror("failed to send ICMP packet");
         }
     }
+
+    return EXIT_SUCCESS;
 }
 
 int icmp_udp_tunnel(struct session *s)
@@ -208,10 +214,9 @@ int icmp_udp_tunnel(struct session *s)
 
         printf("Device selected for packet capture: %s\n", capdev);
 
-        bpf_u_int32 net;
-        char bpf_filter[] = "icmp[icmptype] == icmp-echo and icmp[4] == 0x13 and icmp[5] = 0x37";
         struct bpf_program fp;
-        if (pcap_compile(s->cap_ptr, &fp, bpf_filter, 0, net) == -1)
+        char bpf_filter[] = "icmp[icmptype] == icmp-echo and icmp[4] == 0x13 and icmp[5] = 0x37";
+        if (pcap_compile(s->cap_ptr, &fp, bpf_filter, 0, 0) == -1)
         {
             fprintf(stderr, "Can't parse filter %s: %s\n", bpf_filter, pcap_geterr(s->cap_ptr));
             return EXIT_FAILURE;
@@ -282,7 +287,7 @@ int icmp_udp_tunnel(struct session *s)
 
     pthread_create(&threads[0], NULL, (void*(*)(void*))&icmp_udp_remote_to_server_loop, (void*)s);
 
-    for (int i = 0; i < sizeof(threads) / sizeof(threads[0]); i++)
+    for (unsigned int i = 0; i < sizeof(threads) / sizeof(threads[0]); i++)
     {
         pthread_join(threads[i], NULL);  
     }

@@ -10,7 +10,7 @@ int udp_tcp_server_to_remote_loop(struct session *s)
     {
         // udp -> tcp
 
-        socklen_t msglen = recvfrom(s->server_fd, ((char*)buffer) + sizeof(unsigned short), MTU_SIZE, MSG_WAITALL, (struct sockaddr*)&s->client_addr, &addrlen);
+        ssize_t msglen = recvfrom(s->server_fd, ((char*)buffer) + sizeof(unsigned short), MTU_SIZE, MSG_WAITALL, (struct sockaddr*)&s->client_addr, &addrlen);
 
         if (msglen == -1)
         {
@@ -22,7 +22,7 @@ int udp_tcp_server_to_remote_loop(struct session *s)
             continue;
         }
 
-        if (s->verbose) printf("Received %d bytes from client\n", msglen);
+        if (s->verbose) printf("Received %zd bytes from client\n", msglen);
         if (s->obfuscate) obfuscate_message(((char*)buffer) + sizeof(unsigned short), msglen);
 
         int sizelen = 0;
@@ -72,11 +72,11 @@ int udp_tcp_remote_to_server_loop(struct session *s)
 
         while (toread > 0 && run)
         {
-            socklen_t msglen = read(s->remote_fd, (char*)buffer + (readsize - toread), toread);
+            ssize_t msglen = read(s->remote_fd, (char*)buffer + (readsize - toread), toread);
 
             if (s->verbose && toread != msglen)
             {
-                printf("Read partially, need %u more bytes.\n", toread - msglen);
+                printf("Read partially, need %ld more bytes.\n", toread - msglen);
             }
 
             toread -= msglen;
@@ -142,7 +142,7 @@ int udp_tcp_tunnel(struct session *s)
     pthread_create(&threads[0], NULL, (void*(*)(void*))&udp_tcp_server_to_remote_loop, (void*)s);
     pthread_create(&threads[1], NULL, (void*(*)(void*))&udp_tcp_remote_to_server_loop, (void*)s);
 
-    for (int i = 0; i < sizeof(threads) / sizeof(threads[0]); i++)
+    for (unsigned int i = 0; i < sizeof(threads) / sizeof(threads[0]); i++)
     {
         pthread_join(threads[i], NULL);  
     }

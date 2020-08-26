@@ -1,6 +1,6 @@
 #include "shared.c"
 
-void udp_icmp6_server_to_remote_loop(struct session *s)
+int udp_icmp6_server_to_remote_loop(struct session *s)
 {
     int res;
     char buffer[MTU_SIZE];
@@ -10,7 +10,7 @@ void udp_icmp6_server_to_remote_loop(struct session *s)
     {
         // udp -> icmp
 
-        socklen_t msglen = recvfrom(s->server_fd, (char*)buffer + ICMP_LEN, MTU_SIZE - ICMP_LEN, MSG_WAITALL, (struct sockaddr*)&s->client_addr, &addrlen);
+        ssize_t msglen = recvfrom(s->server_fd, (char*)buffer + ICMP_LEN, MTU_SIZE - ICMP_LEN, MSG_WAITALL, (struct sockaddr*)&s->client_addr, &addrlen);
 
         if (msglen == -1)
         {
@@ -31,7 +31,7 @@ void udp_icmp6_server_to_remote_loop(struct session *s)
             printf(":%d\n", ntohs(s->client_addr.sin_port));
         }
 
-        if (s->verbose) printf("Received %d bytes from client\n", msglen);
+        if (s->verbose) printf("Received %zd bytes from client\n", msglen);
         if (s->obfuscate) obfuscate_message(buffer + ICMP_LEN, msglen);
 
         *((unsigned short*)&buffer) = 0x80; // type -> echo request
@@ -47,9 +47,11 @@ void udp_icmp6_server_to_remote_loop(struct session *s)
             perror("failed to send ICMP packet");
         }
     }
+
+    return EXIT_SUCCESS;
 }
 
-void udp_icmp6_remote_to_server_loop(struct session *s)
+int udp_icmp6_remote_to_server_loop(struct session *s)
 {
     int res;
     char buffer[MTU_SIZE];
@@ -69,7 +71,7 @@ void udp_icmp6_remote_to_server_loop(struct session *s)
             continue;
         }
 
-        socklen_t msglen = recvfrom(s->remote_fd, (char*)buffer, MTU_SIZE, 0, (struct sockaddr*)&
+        ssize_t msglen = recvfrom(s->remote_fd, (char*)buffer, MTU_SIZE, 0, (struct sockaddr*)&
 #ifdef AF_PACKET
                 s->remote_addr
 #else
@@ -97,7 +99,7 @@ void udp_icmp6_remote_to_server_loop(struct session *s)
         *(struct sockaddr_in6*)&s->remote_addr = temp_addr;
 #endif
 
-        if (s->verbose) printf("Received %d bytes from remote\n", msglen - ICMP6_SKIP);
+        if (s->verbose) printf("Received %zd bytes from remote\n", msglen - ICMP6_SKIP);
         if (s->obfuscate) obfuscate_message(buffer + ICMP6_SKIP, msglen - ICMP6_SKIP);
 
         res = sendto(s->server_fd, (char*)buffer + ICMP6_SKIP, msglen - ICMP6_SKIP, 0, (const struct sockaddr *)&s->client_addr, IP_SIZE);
@@ -107,10 +109,12 @@ void udp_icmp6_remote_to_server_loop(struct session *s)
             perror("failed to send UDP packet");
         }
     }
+
+    return EXIT_SUCCESS;
 }
 
 #if HAVE_PCAP
-void udp_icmp6_remote_to_server_pcap_loop(struct session *s)
+int udp_icmp6_remote_to_server_pcap_loop(struct session *s)
 {
     int res;
     const u_char *cap_buffer;
@@ -148,6 +152,8 @@ void udp_icmp6_remote_to_server_pcap_loop(struct session *s)
             perror("failed to send UDP packet");
         }
     }
+
+    return EXIT_SUCCESS;
 }
 #endif
 
@@ -188,17 +194,16 @@ int udp_icmp6_tunnel(struct session *s)
 
         printf("Device selected for packet capture: %s\n", cap_dev);
 
-        bpf_u_int32 net;
-        static const char bpf_filter[] = "icmp6[icmp6type] == icmp6-echoreply and icmp6[4] == 0x13 and icmp6[5] = 0x37";
         struct bpf_program fp;
-        if (pcap_compile(s->cap_ptr, &fp, bpf_filter, 0, net) == -1)
+        static const char bpf_filter[] = "icmp6[icmp6type] == icmp6-echoreply and icmp6[4] == 0x13 and icmp6[5] = 0x37";
+        if (pcap_compile(s->cap_ptr, &fp, bpf_filter, 0, 0) == -1)
         {
             int still_fails = 1;
 
             // icmp6[] was added very recently, retry with fallback expression
 
             char bpf_filter_legacy[] = "icmp6 and ip6[40] == 0x81 and ip6[44] == 0x13 and ip6[45] = 0x37";
-            if (pcap_compile(s->cap_ptr, &fp, bpf_filter_legacy, 0, net) != -1)
+            if (pcap_compile(s->cap_ptr, &fp, bpf_filter_legacy, 0, 0) != -1)
             {
                 still_fails = 0;
             }
@@ -283,7 +288,7 @@ int udp_icmp6_tunnel(struct session *s)
         pthread_create(&threads[1], NULL, (void*(*)(void*))&udp_icmp6_remote_to_server_loop, (void*)s);
     }
 
-    for (int i = 0; i < sizeof(threads) / sizeof(threads[0]); i++)
+    for (unsigned int i = 0; i < sizeof(threads) / sizeof(threads[0]); i++)
     {
         pthread_join(threads[i], NULL);  
     }

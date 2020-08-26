@@ -1,6 +1,6 @@
 #include "shared.c"
 
-void udp_udp_server_to_remote_loop(struct session *s)
+int udp_udp_server_to_remote_loop(struct session *s)
 {
     int res;
     char buffer[MTU_SIZE];
@@ -8,7 +8,7 @@ void udp_udp_server_to_remote_loop(struct session *s)
 
     while (run)
     {
-        socklen_t msglen = recvfrom(s->server_fd, (char*)buffer, MTU_SIZE, MSG_WAITALL, (struct sockaddr*)&s->client_addr, &addrlen);
+        ssize_t msglen = recvfrom(s->server_fd, (char*)buffer, MTU_SIZE, MSG_WAITALL, (struct sockaddr*)&s->client_addr, &addrlen);
 
         if (msglen == -1)
         {
@@ -29,7 +29,7 @@ void udp_udp_server_to_remote_loop(struct session *s)
             printf(":%d\n", ntohs(s->client_addr.sin_port));
         }
 
-        if (s->verbose) printf("Received %d bytes from client\n", msglen);
+        if (s->verbose) printf("Received %zd bytes from client\n", msglen);
         if (s->obfuscate) obfuscate_message(buffer, msglen);
 
         res = sendto(s->remote_fd, (char*)buffer, msglen, 0, (const struct sockaddr *)&s->remote_addr, IP_SIZE);
@@ -39,9 +39,11 @@ void udp_udp_server_to_remote_loop(struct session *s)
             perror("failed to send UDP packet");
         }
     }
+
+    return EXIT_SUCCESS;
 }
 
-void udp_udp_remote_to_server_loop(struct session *s)
+int udp_udp_remote_to_server_loop(struct session *s)
 {
     int res;
     char buffer[MTU_SIZE];
@@ -55,7 +57,7 @@ void udp_udp_remote_to_server_loop(struct session *s)
             continue;
         }
 
-        socklen_t msglen = recvfrom(s->remote_fd, (char*)buffer, MTU_SIZE, MSG_WAITALL, (struct sockaddr*)&s->remote_addr, &addrlen);
+        ssize_t msglen = recvfrom(s->remote_fd, (char*)buffer, MTU_SIZE, MSG_WAITALL, (struct sockaddr*)&s->remote_addr, &addrlen);
 
         if (msglen == -1)
         {
@@ -67,7 +69,7 @@ void udp_udp_remote_to_server_loop(struct session *s)
             continue;
         }
 
-        if (s->verbose) printf("Received %d bytes from remote\n", msglen);
+        if (s->verbose) printf("Received %zd bytes from remote\n", msglen);
         if (s->obfuscate) obfuscate_message(buffer, msglen);
 
         res = sendto(s->server_fd, (char*)buffer, msglen, 0, (const struct sockaddr *)&s->client_addr, IP_SIZE);
@@ -77,6 +79,8 @@ void udp_udp_remote_to_server_loop(struct session *s)
             perror("failed to send UDP packet");
         }
     }
+
+    return EXIT_SUCCESS;
 }
 
 int udp_udp_tunnel(struct session *s)
@@ -111,7 +115,7 @@ int udp_udp_tunnel(struct session *s)
     pthread_create(&threads[0], NULL, (void*(*)(void*))&udp_udp_server_to_remote_loop, (void*)s);
     pthread_create(&threads[1], NULL, (void*(*)(void*))&udp_udp_remote_to_server_loop, (void*)s);
 
-    for (int i = 0; i < sizeof(threads) / sizeof(threads[0]); i++)
+    for (unsigned int i = 0; i < sizeof(threads) / sizeof(threads[0]); i++)
     {
         pthread_join(threads[i], NULL);  
     }
