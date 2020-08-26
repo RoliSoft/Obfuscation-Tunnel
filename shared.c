@@ -32,7 +32,8 @@
 #define MODE_ICMP6_UDP 6
 #define MTU_SIZE 1500
 
-#define IP_SIZE sizeof(struct sockaddr_in6)
+#define IP_SIZE sizeof(struct sockaddr_in)
+#define IP6_SIZE sizeof(struct sockaddr_in6)
 #define ETHHDR_LEN 14
 #define IPHDR_LEN 20
 #define IPHDR_SRC_OFFSET 12
@@ -60,19 +61,19 @@ struct session
 
     // local server configured with -l
     struct sockaddr_in local_addr;
-    char __local_addr_pad[sizeof(struct sockaddr_in6) - sizeof(struct sockaddr_in)];
+    char __local_addr_pad[IP6_SIZE - IP_SIZE];
     int local_port;
     int server_fd;
 
     // remote gateway or end server configured with -r
     struct sockaddr_in remote_addr;
-    char __remote_addr_pad[sizeof(struct sockaddr_in6) - sizeof(struct sockaddr_in)];
+    char __remote_addr_pad[IP6_SIZE - IP_SIZE];
     int remote_port;
     int remote_fd;
 
     // address of the connecting client to local server
     struct sockaddr_in client_addr;
-    char __client_addr_pad[sizeof(struct sockaddr_in6) - sizeof(struct sockaddr_in)];
+    char __client_addr_pad[IP6_SIZE - IP_SIZE];
     int client_fd;
 
     // protocol-dependent stateful variables

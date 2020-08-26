@@ -10,46 +10,6 @@ void udp_icmp_server_to_remote_loop(struct session *s)
     {
         // udp -> icmp
 
-        if (!s->connected)
-        {
-            if (s->verbose) printf("Waiting for first packet from client...\n");
-
-            socklen_t msglen = recvfrom(s->server_fd, (char*)buffer + ICMP_LEN, MTU_SIZE - ICMP_LEN, 0, (struct sockaddr*)&s->client_addr, &addrlen);
-
-            if (msglen == -1)
-            {
-                if (run)
-                {
-                    perror("failed to read UDP packet");
-                }
-
-                continue;
-            }
-
-            printf("Client connected from ");
-            print_ip(&s->client_addr);
-            printf(":%d\n", ntohs(s->client_addr.sin_port));
-
-            if (s->verbose) printf("Received %d bytes from client\n", msglen);
-            if (s->obfuscate) obfuscate_message(buffer + ICMP_LEN, msglen);
-
-            *((unsigned short*)&buffer) = 8; // type -> echo request
-            *((unsigned short*)&buffer[4]) = 0x3713; // identifier
-            *((unsigned short*)&buffer[6]) = htons(s->sequence++); // sequence
-            *((unsigned short*)&buffer[2]) = 0; // zero checksum before calculation
-            *((unsigned short*)&buffer[2]) = ip_checksum((char*)&buffer, msglen + ICMP_LEN);
-
-            res = sendto(s->remote_fd, (char*)buffer, msglen + ICMP_LEN, 0, (const struct sockaddr *)&s->remote_addr, IP_SIZE);
-
-            if (res < 0)
-            {
-                perror("failed to send ICMP packet");
-            }
-
-            s->connected = 1;
-            continue;
-        }
-
         socklen_t msglen = recvfrom(s->server_fd, (char*)buffer + ICMP_LEN, MTU_SIZE - ICMP_LEN, MSG_WAITALL, (struct sockaddr*)&s->client_addr, &addrlen);
 
         if (msglen == -1)
@@ -60,6 +20,15 @@ void udp_icmp_server_to_remote_loop(struct session *s)
             }
 
             continue;
+        }
+
+        if (!s->connected)
+        {
+            s->connected = 1;
+
+            printf("Client connected from ");
+            print_ip(&s->client_addr);
+            printf(":%d\n", ntohs(s->client_addr.sin_port));
         }
 
         if (s->verbose) printf("Received %d bytes from client\n", msglen);

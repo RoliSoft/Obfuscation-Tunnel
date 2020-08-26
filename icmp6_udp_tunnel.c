@@ -4,7 +4,7 @@ void icmp6_udp_server_to_remote_loop(struct session *s)
 {
     int res;
     char buffer[MTU_SIZE];
-    socklen_t addrlen = IP_SIZE;
+    socklen_t addrlen = IP6_SIZE;
 
 #ifndef AF_PACKET
     struct sockaddr_in6 temp_addr;
@@ -13,58 +13,6 @@ void icmp6_udp_server_to_remote_loop(struct session *s)
     while (run)
     {
         // icmp -> udp
-
-        if (!s->connected)
-        {
-            if (s->verbose) printf("Waiting for first packet from client...\n");
-
-            socklen_t msglen = recvfrom(s->server_fd, (char*)buffer, MTU_SIZE, 0, (struct sockaddr*)&
-#ifdef AF_PACKET
-                s->client_addr
-#else
-                temp_addr
-#endif
-                , &addrlen);
-
-            if (msglen == -1)
-            {
-                if (run)
-                {
-                    perror("failed to read ICMP packet");
-                }
-
-                continue;
-            }
-
-#ifndef AF_PACKET
-            if ((unsigned char)buffer[0] != 0x80 || (unsigned char)buffer[4] != 0x13 || (unsigned char)buffer[5] != 0x37)
-            {
-                continue;
-            }
-
-            // make sure the return address is not overwritten if not tunnel packet
-            *(struct sockaddr_in6*)&s->client_addr = temp_addr;
-#endif
-
-            printf("Client connected from ");
-            print_ip6((struct sockaddr_in6*)&s->client_addr);
-            printf("\n");
-
-            if (s->verbose) printf("Received %d bytes from client\n", msglen - ICMP6_SKIP);
-            if (s->obfuscate) obfuscate_message(buffer + ICMP6_SKIP, msglen - ICMP6_SKIP);
-
-            s->sequence = *((unsigned short*)&buffer[ICMP_SEQ_OFFSET]);
-
-            res = sendto(s->remote_fd, (char*)buffer + ICMP6_SKIP, msglen - ICMP6_SKIP, 0, (const struct sockaddr *)&s->remote_addr, IP_SIZE);
-            
-            if (res < 0)
-            {
-                perror("failed to send UDP packet");
-            }
-
-            s->connected = 1;
-            continue;
-        }
 
         socklen_t msglen = recvfrom(s->server_fd, (char*)buffer, MTU_SIZE, 0, (struct sockaddr*)&
 #ifdef AF_PACKET
@@ -85,14 +33,23 @@ void icmp6_udp_server_to_remote_loop(struct session *s)
         }
 
 #ifndef AF_PACKET
-            if ((unsigned char)buffer[0] != 0x80 || (unsigned char)buffer[4] != 0x13 || (unsigned char)buffer[5] != 0x37)
-            {
-                continue;
-            }
+        if ((unsigned char)buffer[0] != 0x80 || (unsigned char)buffer[4] != 0x13 || (unsigned char)buffer[5] != 0x37)
+        {
+            continue;
+        }
 
-            // make sure the return address is not overwritten if not tunnel packet
-            *(struct sockaddr_in6*)&s->client_addr = temp_addr;
+        // make sure the return address is not overwritten if not tunnel packet
+        *(struct sockaddr_in6*)&s->client_addr = temp_addr;
 #endif
+
+        if (!s->connected)
+        {
+            s->connected = 1;
+
+            printf("Client connected from ");
+            print_ip6((struct sockaddr_in6*)&s->client_addr);
+            printf("\n");
+        }
 
         if (s->verbose) printf("Received %d bytes from client\n", msglen - ICMP6_SKIP);
         if (s->obfuscate) obfuscate_message(buffer + ICMP6_SKIP, msglen - ICMP6_SKIP);
@@ -118,52 +75,6 @@ void icmp6_udp_server_to_remote_pcap_loop(struct session *s)
     {
         // icmp -> udp
 
-        if (!s->connected)
-        {
-            if (s->verbose) printf("Waiting for first packet from client...\n");
-
-            res = pcap_next_ex(s->cap_ptr, &cap_data, &cap_buffer);
-
-            if (res == 0)
-            {
-                sleep(1);
-                continue;
-            }
-            else if (res < 0)
-            {
-                if (run)
-                {
-                    pcap_perror(s->cap_ptr, "failed to read ICMP packet");
-                }
-
-                continue;
-            }
-
-            memset(&s->client_addr, 0, sizeof(struct sockaddr_in6));
-            ((struct sockaddr_in6*)&s->client_addr)->sin6_family = AF_INET6;
-            ((struct sockaddr_in6*)&s->client_addr)->sin6_flowinfo = 0;
-            ((struct sockaddr_in6*)&s->client_addr)->sin6_addr = *((struct in6_addr*)(cap_buffer + ETHHDR_LEN + IP6HDR_SRC_OFFSET));
-
-            printf("Client connected from ");
-            print_ip6((struct sockaddr_in6*)&s->client_addr);
-            printf("\n");
-            
-            if (s->verbose) printf("Received %d bytes from client\n", cap_data->caplen - PCAP_ICMP6_SKIP);
-            if (s->obfuscate) obfuscate_message((char*)cap_buffer + PCAP_ICMP6_SKIP, cap_data->caplen - PCAP_ICMP6_SKIP);
-
-            s->sequence = ntohs(*((unsigned short*)&cap_buffer[ETHHDR_LEN + IP6HDR_LEN + ICMP_SEQ_OFFSET]));
-
-            res = sendto(s->remote_fd, (char*)cap_buffer + PCAP_ICMP6_SKIP, cap_data->caplen - PCAP_ICMP6_SKIP, 0, (const struct sockaddr *)&s->remote_addr, IP_SIZE);
-            
-            if (res < 0)
-            {
-                perror("failed to send UDP packet");
-            }
-
-            s->connected = 1;
-            continue;
-        }
-
         res = pcap_next_ex(s->cap_ptr, &cap_data, &cap_buffer);
 
         if (res < 1)
@@ -173,11 +84,32 @@ void icmp6_udp_server_to_remote_pcap_loop(struct session *s)
                 pcap_perror(s->cap_ptr, "failed to read ICMP packet");
             }
 
+            if (res == 0 && !s->connected)
+            {
+                sleep(1);
+            }
+
             continue;
         }
 
-        ((struct sockaddr_in6*)&s->client_addr)->sin6_addr = *((struct in6_addr*)(cap_buffer + ETHHDR_LEN + IP6HDR_SRC_OFFSET));
+        if (!s->connected)
+        {
+            s->connected = 1;
 
+            memset(&s->client_addr, 0, sizeof(struct sockaddr_in6));
+            ((struct sockaddr_in6*)&s->client_addr)->sin6_family = AF_INET6;
+            ((struct sockaddr_in6*)&s->client_addr)->sin6_flowinfo = 0;
+            ((struct sockaddr_in6*)&s->client_addr)->sin6_addr = *((struct in6_addr*)(cap_buffer + ETHHDR_LEN + IP6HDR_SRC_OFFSET));
+
+            printf("Client connected from ");
+            print_ip6((struct sockaddr_in6*)&s->client_addr);
+            printf("\n");
+        }
+        else
+        {
+            ((struct sockaddr_in6*)&s->client_addr)->sin6_addr = *((struct in6_addr*)(cap_buffer + ETHHDR_LEN + IP6HDR_SRC_OFFSET));
+        }
+ 
         if (s->verbose) printf("Received %d bytes from client\n", cap_data->caplen - PCAP_ICMP6_SKIP);
         if (s->obfuscate) obfuscate_message((char*)cap_buffer + PCAP_ICMP6_SKIP, cap_data->caplen - PCAP_ICMP6_SKIP);
 
@@ -229,7 +161,7 @@ void icmp6_udp_remote_to_server_loop(struct session *s)
         *((unsigned short*)&buffer[2]) = 0; // zero checksum before calculation
         *((unsigned short*)&buffer[2]) = ip_checksum((char*)&buffer, msglen + ICMP_LEN);
 
-        res = sendto(s->server_fd, (char*)buffer, msglen + ICMP_LEN, 0, (const struct sockaddr *)&s->client_addr, IP_SIZE);
+        res = sendto(s->server_fd, (char*)buffer, msglen + ICMP_LEN, 0, (const struct sockaddr *)&s->client_addr, IP6_SIZE);
 
         if (res < 0)
         {
