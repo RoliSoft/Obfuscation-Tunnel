@@ -177,22 +177,26 @@ int udp_icmp6_tunnel(struct session *s)
         pcap_if_t *cap_devs;
         char cap_err[PCAP_ERRBUF_SIZE];
 
-        pcap_findalldevs(&cap_devs, cap_err);
-        if (cap_devs == NULL)
+        if (s->cap_dev == NULL)
         {
-            printf("Error finding devices: %s\n", cap_err);
-            return EXIT_FAILURE;
+            pcap_findalldevs(&cap_devs, cap_err);
+            if (cap_devs == NULL)
+            {
+                printf("Error finding devices: %s\n", cap_err);
+                return EXIT_FAILURE;
+            }
+
+            s->cap_dev = cap_devs->name;
         }
 
-        char* cap_dev = cap_devs->name;
-        s->cap_ptr = pcap_open_live(cap_dev, MTU_SIZE, 0, 1, cap_err);
+        s->cap_ptr = pcap_open_live(s->cap_dev, MTU_SIZE, 1, 1, cap_err);
         if (s->cap_ptr == NULL)
         {
-            fprintf(stderr, "Can't open pcap device %s: %s\n", cap_dev, cap_err);
+            fprintf(stderr, "Can't open pcap device %s: %s\n", s->cap_dev, cap_err);
             return EXIT_FAILURE;
         }
 
-        printf("Device selected for packet capture: %s\n", cap_dev);
+        printf("Device selected for packet capture: %s\n", s->cap_dev);
 
         struct bpf_program fp;
         static const char bpf_filter[] = "icmp6[icmp6type] == icmp6-echoreply and icmp6[4] == 0x13 and icmp6[5] = 0x37";

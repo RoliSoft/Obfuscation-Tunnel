@@ -21,6 +21,10 @@
     #include <linux/filter.h>
 #endif
 
+#ifndef HAVE_PCAP
+    #define HAVE_PCAP 1
+#endif
+
 #if HAVE_PCAP
     #include <pcap/pcap.h>
 #endif
@@ -49,6 +53,8 @@
 #define PCAP_ICMP6_SKIP (ETHHDR_LEN + IP6HDR_LEN + ICMP_LEN)
 
 #define min(X, Y) (((X) < (Y)) ? (X) : (Y))
+#define max(X, Y) (((X) > (Y)) ? (X) : (Y))
+#define if_optional_arg() if (optarg && optarg[0] == '-') { optind--; continue; } else if (optarg)
 
 static volatile sig_atomic_t run = 1;
 static int sockets[10];
@@ -86,6 +92,7 @@ struct session
 
 #if HAVE_PCAP
     pcap_t *cap_ptr;
+    char *cap_dev;
 #endif
 };
 
@@ -357,7 +364,7 @@ void print_help(char* argv[])
     printf("   -l addr:port\tLocal listening address and port.\n   \t\t  Optional, defaults to 127.0.0.1:8080\n");
     printf("   -m mode\tOperation mode. Possible values:\n   \t\t  uu - UDP-to-UDP (Default)\n   \t\t  ut - UDP-to-TCP\n   \t\t  tu - TCP-to-UDP\n   \t\t  ui - UDP-to-ICMP (Requires root)\n   \t\t  iu - ICMP-to-UDP (Requires root)\n   \t\t  ui6 - UDP-to-ICMPv6 (Requires root)\n   \t\t  i6u - ICMPv6-to-UDP (Requires root)\n");
 #if HAVE_PCAP
-    printf("   -p\t\tUse PCAP, only applicable to ICMP tunnels, highly recommended.\n");
+    printf("   -p [if]\tUse PCAP, only applicable to ICMP tunnels, highly recommended.\n   \t\t  Optional argument value to specify network interface.\n");
 #endif
     printf("   -o\t\tEnable generic header obfuscation.\n");
     printf("   -v\t\tDetailed logging at the expense of decreased throughput.\n");
@@ -378,8 +385,13 @@ int parse_arguments(int argc, char* argv[], struct session *s)
     s->local_port = 8080;
 
     int opt;
-    while((opt = getopt(argc, argv, "hm:l:r:opv")) != -1)
+    while((opt = getopt(argc, argv, ":hm:l:r:op:v")) != -1)
     {
+        if (opt == ':' && optopt != opt)
+        {
+            opt = optopt;
+        }
+
         switch (opt)
         {
             case 'h':
@@ -433,6 +445,11 @@ int parse_arguments(int argc, char* argv[], struct session *s)
             case 'p':
 #if HAVE_PCAP
                 s->pcap = 1;
+
+                if_optional_arg()
+                {
+                    s->cap_dev = optarg;
+                }
                 break;
 #else
                 fprintf(stderr, "This version was not compiled with PCAP support.\n");
