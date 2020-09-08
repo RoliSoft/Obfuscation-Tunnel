@@ -46,6 +46,7 @@
 #define IP6HDR_LEN 40
 #define IP6HDR_SRC_OFFSET 8
 #define ICMP_LEN 8
+#define ICMP_ID_OFFSET 4
 #define ICMP_SEQ_OFFSET 6
 #define ICMP_SKIP (IPHDR_LEN + ICMP_LEN)
 #define ICMP6_SKIP ICMP_LEN
@@ -88,7 +89,9 @@ struct session
 
     // protocol-dependent stateful variables
     int connected;
+    unsigned short identifier;
     unsigned short sequence;
+    int random_id;
 
 #if HAVE_PCAP
     pcap_t *cap_ptr;
@@ -363,12 +366,14 @@ void print_help(char* argv[])
     printf("   -r addr:port\tRemote host to tunnel packets to.\n");
     printf("   -l addr:port\tLocal listening address and port.\n   \t\t  Optional, defaults to 127.0.0.1:8080\n");
     printf("   -m mode\tOperation mode. Possible values:\n   \t\t  uu - UDP-to-UDP (Default)\n   \t\t  ut - UDP-to-TCP\n   \t\t  tu - TCP-to-UDP\n   \t\t  ui - UDP-to-ICMP (Requires root)\n   \t\t  iu - ICMP-to-UDP (Requires root)\n   \t\t  ui6 - UDP-to-ICMPv6 (Requires root)\n   \t\t  i6u - ICMPv6-to-UDP (Requires root)\n");
-#if HAVE_PCAP
-    printf("   -p [if]\tUse PCAP, only applicable to ICMP tunnels, highly recommended.\n   \t\t  Optional argument value to specify network interface.\n");
-#endif
     printf("   -o\t\tEnable generic header obfuscation.\n");
     printf("   -v\t\tDetailed logging at the expense of decreased throughput.\n");
     printf("   -h\t\tDisplays this message.\n");
+    printf("\nICMP-specific arguments:\n\n");
+#if HAVE_PCAP
+    printf("   -p [if]\tUse PCAP for inbound, highly recommended.\n   \t\t  Optional value, defaults to default gateway otherwise.\n");
+#endif
+    printf("   -x\t\tExpect identifier and sequence randomization.\n   \t\t  Not recommended, see documentation for pros and cons.\n");
 }
 
 int parse_arguments(int argc, char* argv[], struct session *s)
@@ -385,7 +390,7 @@ int parse_arguments(int argc, char* argv[], struct session *s)
     s->local_port = 8080;
 
     int opt;
-    while((opt = getopt(argc, argv, ":hm:l:r:op:v")) != -1)
+    while((opt = getopt(argc, argv, ":hm:l:r:op:vx")) != -1)
     {
         if (opt == ':' && optopt != opt)
         {
@@ -440,6 +445,10 @@ int parse_arguments(int argc, char* argv[], struct session *s)
             
             case 'o':
                 s->obfuscate = 1;
+                break;
+            
+            case 'x':
+                s->random_id = 1;
                 break;
             
             case 'p':

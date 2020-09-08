@@ -90,7 +90,7 @@ int udp_icmp_remote_to_server_loop(struct session *s)
         }
 
 #ifndef AF_PACKET
-        if ((unsigned char)buffer[IPHDR_LEN] != 0x00 || (unsigned char)buffer[4 + IPHDR_LEN] != 0x13 || (unsigned char)buffer[5 + IPHDR_LEN] != 0x37)
+        if ((unsigned char)buffer[IPHDR_LEN] != 0x00 || (!s->random_id && ((unsigned char)buffer[4 + IPHDR_LEN] != 0x13 || (unsigned char)buffer[5 + IPHDR_LEN] != 0x37)))
         {
             continue;
         }
@@ -199,7 +199,16 @@ int udp_icmp_tunnel(struct session *s)
         printf("Device selected for packet capture: %s\n", s->cap_dev);
 
         struct bpf_program fp;
-        static const char bpf_filter[] = "icmp[icmptype] == icmp-echoreply and icmp[4] == 0x13 and icmp[5] = 0x37";
+        char *bpf_filter;
+        if (s->random_id)
+        {
+            bpf_filter = "icmp[icmptype] == icmp-echoreply";
+        }
+        else
+        {
+            bpf_filter = "icmp[icmptype] == icmp-echoreply and icmp[4] == 0x13 and icmp[5] = 0x37";
+        }
+
         if (pcap_compile(s->cap_ptr, &fp, bpf_filter, 0, 0) == -1)
         {
             fprintf(stderr, "Can't parse filter %s: %s\n", bpf_filter, pcap_geterr(s->cap_ptr));
@@ -224,7 +233,16 @@ int udp_icmp_tunnel(struct session *s)
         struct bpf_program bpf;
         s->cap_ptr = pcap_open_dead(DLT_EN10MB, MTU_SIZE);
 
-        static const char bpf_filter[] = "ether[20] == 0x00 && ether[24] == 0x13 && ether[25] == 0x37";
+        char *bpf_filter;
+        if (s->random_id)
+        {
+            bpf_filter = "ether[20] == 0x00";
+        }
+        else
+        {
+            bpf_filter = "ether[20] == 0x00 && ether[24] == 0x13 && ether[25] == 0x37";
+        }
+
         if (pcap_compile(s->cap_ptr, &bpf, bpf_filter, 0, PCAP_NETMASK_UNKNOWN) == -1)
         {
             fprintf(stderr, "Can't parse filter %s: %s\n", bpf_filter, pcap_geterr(s->cap_ptr));

@@ -22,10 +22,16 @@ arguments:
                   iu - ICMP-to-UDP (Requires root)
                   ui6 - UDP-to-ICMPv6 (Requires root)
                   i6u - ICMPv6-to-UDP (Requires root)
-   -p           Use PCAP, only applicable to ICMP tunnels, highly recommended.
    -o           Enable generic header obfuscation.
    -v           Detailed logging at the expense of decreased throughput.
    -h           Displays this message.
+
+ICMP-specific arguments:
+
+   -p [if]      Use PCAP for inbound, highly recommended.
+                  Optional value, defaults to default gateway otherwise.
+   -x           Expect identifier and sequence randomization.
+                  Not recommended, see documentation for pros and cons.
 ```
 
 Example for UDP-to-UDP tunnel:
@@ -204,6 +210,16 @@ On Linux, you can turn off answering ICMP Echo Requests (only needed on the gate
 echo 1 > /proc/sys/net/ipv4/icmp_echo_ignore_all
 ```
 
+### Possible NAT issues
+
+By default, in order to make sure non-tunnel ICMP Echo Requests cannot hijack the data stream, there is a hardcoded identifier number and a sequential sequence number that is kept in sync between requests and replies.
+
+Unfortunately, some NATs are replacing the identifier and sequence numbers to completely random values in the ICMP Echo Request reaching the gateway server, but will be translated back to their original values once the gateway server sends the ICMP Echo Reply. This means that the client can filter by the magic number in the identifier, and keep track of the sequence, but the gateway server cannot.
+
+As a result, if you are behind such a NAT, you must turn on the "expect identifier and sequence randomization" (`-x` flag) feature on the gateway server (the one running with `-m iu`). This will ensure that the gateway server will not filter by magic identifier, and does not increment the sequence number -- as the NAT would not route a different sequence back to the same client.
+
+The downside of this is that the gateway server will receive all ICMP Echo Requests coming to the server, and may reply to them if the remote UDP server produces a result. (In case of Wireguard, packets that are not correctly formatted and encrypted will not receive any sort of reply, so this is mostly a non-issue.)
+
 ### Libpcap
 
 PCAP support can be turned on using the `-p` flag when ICMP or ICMPv6 tunnels are used. When PCAP support is turned on, ICMP packets are not read from the raw socket, but instead sniffed from the network interface. This allows a significantly better throughput (see Benchmark section) and should always be used when the application can be compiled with libpcap support.
@@ -250,7 +266,7 @@ The setup chosen for the benchmark is that a local PC is connected behind a fire
 | UDP-ICMP <sup>(2)</sup> | 73 ms | 2.5 Mbps | 120 Mbps |
 
 1.  There is a 19 ms latency between the PC and the gateway, this will added to the tunneled results. So when calculating the overhead purely for the application, latency calculations should start by taking 33 ms as the base latency.
-2.  It seems that not all Echo Replies are delivered correctly, even if the Identifier and Sequence number are correct, which is causing the massive drop in throughput.
+2.  It seems that not all ICMP Echo Replies are delivered correctly, even if the identifier and sequence number are correct, which is causing the massive drop in throughput. To fix this, you can turn on the PCAP feature with the `-p` flag.
 
 In order to test the tunneling overhead over a non-ideal "real world scenario", a similar test was conducted using a 4G connection:
 
@@ -261,7 +277,7 @@ In order to test the tunneling overhead over a non-ideal "real world scenario", 
 | UDP-TCP | 107 ms | 49 Mbps | 16 Mbps |
 | UDP-ICMP <sup>(1)</sup> | 84 ms | 45 Mbps | 12 Mbps |
 
-1.  Out of the 4 tested 4G networks, one always did it, and the second one _sometimes_ did it, more specifically they tampered with the ICMP packets, and the gateway server received the ICMP Echo Request with a randomized identifier and sequence number. When reaching back to the client, the identifier and sequence numbers were translated back to their original values, however, this means that the gateway server could not use the harcoded magic number for identification. This is an interesting scenario that was not taken into account up until testing, and further work is required to detect such tampering and work around it without user interaction.
+1.  Out of the 4 tested 4G networks, one _sometimes_ did it, but another one _always_ tampered with the identifier and sequence numbers in the ICMP Echo Request packets. To use the tunnel on these connections, you will need to turn on the `-x` flag on the gateway server. (See "Possible NAT issues".)
 
 ## IPv6 support
 
