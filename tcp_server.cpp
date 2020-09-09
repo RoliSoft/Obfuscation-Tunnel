@@ -1,6 +1,8 @@
+#pragma once
 #include "shared.cpp"
+#include "tcp_base.cpp"
 
-class tcp_server : public transport_base
+class tcp_server : public tcp_base
 {
 private:
     int server_fd, client_fd;
@@ -91,59 +93,12 @@ public:
             return 0;
         }
 
-        int sizelen = 0;
-        write_14bit(msglen, buffer - sizeof(unsigned short), &sizelen);
-        int sizediff = sizeof(unsigned short) - sizelen;
-
-        if (sizediff == 1)
-        {
-            buffer[-1] = buffer[-2];
-        }
-
-        int res = write(this->client_fd, buffer - sizediff, msglen + sizelen);
-
-        if (res < 0 && run)
-        {
-            perror("Failed to send TCP packet");
-        }
-
-        return res;
+        return _send(this->client_fd, buffer, msglen);
     }
 
     int receive(char *buffer, int* offset)
     {
-        unsigned short toread = read_14bit(this->client_fd);
-
-        if (toread == 0)
-        {
-            printf("TCP connection to client lost\n");
-            return EXIT_FAILURE;
-        }
-
-        if (toread > MTU_SIZE)
-        {
-            printf("Incorrect size read from buffer, abandoning read.\n");
-            return EXIT_FAILURE;
-        }
-
-        unsigned short readsize = toread;
-
-        while (run && toread > 0)
-        {
-            ssize_t msglen = read(this->client_fd, buffer + (readsize - toread), toread);
-
-            if (this->verbose && toread != msglen)
-            {
-                printf("Read partially, need %ld more bytes.\n", toread - msglen);
-            }
-
-            toread -= msglen;
-        }
-
-        if (this->verbose) printf("Received %zd bytes from client\n", readsize);
-
-        *offset = 0;
-        return readsize;
+        return _receive(this->client_fd, buffer, offset);
     }
 
     int get_selectable()

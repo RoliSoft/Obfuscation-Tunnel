@@ -1,6 +1,8 @@
+#pragma once
 #include "shared.cpp"
+#include "udp_base.cpp"
 
-class udp_server : public transport_base
+class udp_server : public udp_base
 {
 private:
     int fd;
@@ -52,32 +54,14 @@ public:
             return 0;
         }
 
-        int res = sendto(this->fd, (char*)buffer, msglen, 0, (const struct sockaddr *)&this->client_addr, IP_SIZE);
-
-        if (res < 0 && run)
-        {
-            perror("Failed to send UDP packet");
-        }
-
-        return res;
+        return _send(this->fd, (const struct sockaddr*)&this->client_addr, buffer, msglen);
     }
 
     int receive(char *buffer, int* offset)
     {
-        socklen_t addrlen = IP_SIZE;
-        ssize_t msglen = recvfrom(this->fd, (char*)buffer, MTU_SIZE, MSG_WAITALL, (struct sockaddr*)&this->client_addr, &addrlen);
+        int res = _receive(this->fd, (struct sockaddr*)&this->client_addr, buffer, offset);
 
-        if (msglen == -1)
-        {
-            if (run)
-            {
-                perror("Failed to read UDP packet");
-            }
-
-            return msglen;
-        }
-
-        if (!this->connected)
+        if (!this->connected && res > 0)
         {
             this->connected = 1;
 
@@ -86,10 +70,7 @@ public:
             printf("\n");
         }
 
-        if (this->verbose) printf("Received %zd bytes from client\n", msglen);
-
-        *offset = 0;
-        return msglen;
+        return res;
     }
 
     int get_selectable()
