@@ -112,7 +112,7 @@ public:
     virtual int start() = 0;
     virtual int stop() = 0;
     virtual int send(char *buffer, ssize_t msglen) = 0;
-    virtual int receive(char *buffer) = 0;
+    virtual int receive(char *buffer, int* offset) = 0;
     virtual int get_selectable() { return -1; };
 };
 
@@ -175,28 +175,28 @@ int loop_transports_select(transport_base *local, transport_base *remote, bool o
     fds[1].fd = remote->get_selectable();
     fds[1].events = POLLIN;
 
-    int msglen;
-    char buffer[MTU_SIZE];
+    int msglen, offset;
+    char buffer[MTU_SIZE * 3];
     while (run)
     {
         msglen = poll(fds, 2, 3 * 60 * 1000);
 
         if (fds[0].revents == POLLIN)
         {
-            msglen = local->receive(buffer);
+            msglen = local->receive(buffer + MTU_SIZE, &offset);
 
-            if (obfuscate) obfuscate_message(buffer, msglen);
+            if (obfuscate) obfuscate_message(buffer + MTU_SIZE + offset, msglen);
 
-            remote->send(buffer, msglen);
+            remote->send(buffer + MTU_SIZE + offset, msglen);
         }
 
         if (fds[1].revents == POLLIN)
         {
-            msglen = remote->receive(buffer);
+            msglen = remote->receive(buffer + MTU_SIZE, &offset);
 
-            if (obfuscate) obfuscate_message(buffer, msglen);
+            if (obfuscate) obfuscate_message(buffer  + MTU_SIZE+ offset, msglen);
 
-            local->send(buffer, msglen);
+            local->send(buffer + MTU_SIZE + offset, msglen);
         }
     }
 
@@ -221,29 +221,29 @@ int loop_transports_thread(transport_base *local, transport_base *remote, bool o
 
     threads[0] = std::thread([](transport_base *local, transport_base *remote, bool obfuscate)
     {
-        int msglen;
-        char buffer[MTU_SIZE];
+        int msglen, offset;
+        char buffer[MTU_SIZE * 3];
         while (run)
         {
-            msglen = local->receive(buffer);
+            msglen = local->receive(buffer + MTU_SIZE, &offset);
 
-            if (obfuscate) obfuscate_message(buffer, msglen);
+            if (obfuscate) obfuscate_message(buffer + MTU_SIZE + offset, msglen);
 
-            remote->send(buffer, msglen);
+            remote->send(buffer + MTU_SIZE + offset, msglen);
         }
     }, std::cref(local), std::cref(remote), std::cref(obfuscate));
 
     threads[1] = std::thread([](transport_base *local, transport_base *remote, bool obfuscate)
     {
-        int msglen;
-        char buffer[MTU_SIZE];
+        int msglen, offset;
+        char buffer[MTU_SIZE * 3];
         while (run)
         {
-            msglen = remote->receive(buffer);
+            msglen = remote->receive(buffer + MTU_SIZE, &offset);
 
-            if (obfuscate) obfuscate_message(buffer, msglen);
+            if (obfuscate) obfuscate_message(buffer + MTU_SIZE + offset, msglen);
 
-            local->send(buffer, msglen);
+            local->send(buffer + MTU_SIZE + offset, msglen);
         }
     }, std::cref(local), std::cref(remote), std::cref(obfuscate));
 

@@ -62,7 +62,7 @@ public:
         return res;
     }
 
-    int receive(char *buffer)
+    int receive(char *buffer, int* offset)
     {
         socklen_t addrlen = IP_SIZE;
         ssize_t msglen = recvfrom(this->fd, (char*)buffer, MTU_SIZE, MSG_WAITALL, (struct sockaddr*)&this->client_addr, &addrlen);
@@ -88,6 +88,7 @@ public:
 
         if (this->verbose) printf("Received %zd bytes from client\n", msglen);
 
+        *offset = 0;
         return msglen;
     }
 
