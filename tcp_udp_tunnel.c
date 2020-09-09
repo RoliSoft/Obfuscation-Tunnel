@@ -1,4 +1,4 @@
-#include "shared.c"
+#include "shared.cpp"
 
 int tcp_udp_client_to_remote_loop(struct session *s)
 {

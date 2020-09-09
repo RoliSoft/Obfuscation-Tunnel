@@ -1,5 +1,5 @@
-#include "shared.c"
-#include "udp_udp_tunnel.c"
+#include "shared.cpp"
+#include "udp_udp_tunnel.cpp"
 #include "udp_tcp_tunnel.c"
 #include "tcp_udp_tunnel.c"
 #include "udp_icmp_tunnel.c"

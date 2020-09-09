@@ -1,4 +1,4 @@
-#include "shared.c"
+#include "shared.cpp"
 
 int icmp_udp_server_to_remote_loop(struct session *s)
 {

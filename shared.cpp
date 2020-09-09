@@ -15,6 +15,8 @@
 #include <signal.h>
 #include <pthread.h>
 #include <errno.h>
+#include <vector>
+#include <thread>
 
 #ifdef AF_PACKET
     // Linux
@@ -59,6 +61,7 @@
 
 static volatile sig_atomic_t run = 1;
 static int sockets[10];
+static std::vector<int> sockets2 = std::vector<int>();
 
 struct session
 {
@@ -99,6 +102,20 @@ struct session
 #endif
 };
 
+class transport_base
+{
+public:
+    bool started = false;
+    bool connected = false;
+    bool verbose = false;
+
+    virtual int start() = 0;
+    virtual int stop() = 0;
+    virtual int send(char *buffer, ssize_t msglen) = 0;
+    virtual int receive(char *buffer) = 0;
+    virtual int get_selectable() { return -1; };
+};
+
 static void sig_handler(int _)
 {
     (void)_;
@@ -112,13 +129,10 @@ static void sig_handler(int _)
     run = 0;
     printf("Exiting...\n");
 
-    for (unsigned int i = 0; i < sizeof(sockets) / sizeof(int); i++)
+    for (auto fd : sockets2)
     {
-        if (sockets[i] != 0)
-        {
-            close(sockets[i]);
-            shutdown(sockets[i], SHUT_RDWR);
-        }
+        close(fd);
+        shutdown(fd, SHUT_RDWR);
     }
 }
 
@@ -140,6 +154,108 @@ static inline void obfuscate_message(char* message, int length)
             message[i] ^= 'a';
         }
     }
+}
+
+int loop_transports_select(transport_base *local, transport_base *remote, bool obfuscate)
+{
+    struct pollfd fds[2];
+    memset(fds, 0 , sizeof(fds));
+
+    if (!local->started)
+    {
+        local->start();
+    }
+    if (!remote->started)
+    {
+        remote->start();
+    }
+
+    fds[0].fd = local->get_selectable();
+    fds[0].events = POLLIN;
+    fds[1].fd = remote->get_selectable();
+    fds[1].events = POLLIN;
+
+    int msglen;
+    char buffer[MTU_SIZE];
+    while (run)
+    {
+        msglen = poll(fds, 2, 3 * 60 * 1000);
+
+        if (fds[0].revents == POLLIN)
+        {
+            msglen = local->receive(buffer);
+
+            if (obfuscate) obfuscate_message(buffer, msglen);
+
+            remote->send(buffer, msglen);
+        }
+
+        if (fds[1].revents == POLLIN)
+        {
+            msglen = remote->receive(buffer);
+
+            if (obfuscate) obfuscate_message(buffer, msglen);
+
+            local->send(buffer, msglen);
+        }
+    }
+
+    local->stop();
+    remote->stop();
+
+    return run ? EXIT_FAILURE : EXIT_SUCCESS;
+}
+
+int loop_transports_thread(transport_base *local, transport_base *remote, bool obfuscate)
+{
+    std::thread threads[2];
+
+    if (!local->started)
+    {
+        local->start();
+    }
+    if (!remote->started)
+    {
+        remote->start();
+    }
+
+    threads[0] = std::thread([](transport_base *local, transport_base *remote, bool obfuscate)
+    {
+        int msglen;
+        char buffer[MTU_SIZE];
+        while (run)
+        {
+            msglen = local->receive(buffer);
+
+            if (obfuscate) obfuscate_message(buffer, msglen);
+
+            remote->send(buffer, msglen);
+        }
+    }, std::cref(local), std::cref(remote), std::cref(obfuscate));
+
+    threads[1] = std::thread([](transport_base *local, transport_base *remote, bool obfuscate)
+    {
+        int msglen;
+        char buffer[MTU_SIZE];
+        while (run)
+        {
+            msglen = remote->receive(buffer);
+
+            if (obfuscate) obfuscate_message(buffer, msglen);
+
+            local->send(buffer, msglen);
+        }
+    }, std::cref(local), std::cref(remote), std::cref(obfuscate));
+
+    for (int i = 0; i < 2; i++)
+    {
+        threads[i].join();  
+    }
+
+    local->stop();
+    remote->stop();
+
+    return run ? EXIT_FAILURE : EXIT_SUCCESS;
 }
 
 static inline unsigned short read_14bit(int fd)
@@ -251,6 +367,17 @@ void print_ip(struct sockaddr_in *sockaddr)
     }
 
     printf("%s", addrstr);
+}
+
+void print_ip_port(struct sockaddr_in *sockaddr)
+{
+    if (sockaddr->sin_family != AF_INET)
+    {
+        return;
+    }
+
+    print_ip(sockaddr);
+    printf(":%d", ntohs(sockaddr->sin_port));
 }
 
 void print_ip6(struct sockaddr_in6 *sockaddr)
