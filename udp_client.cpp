@@ -9,8 +9,13 @@ private:
     struct sockaddr_in remote_addr;
 
 public:
-    udp_client(struct sockaddr_in remote_addr)
-        : remote_addr(remote_addr)
+    udp_client(struct session* session)
+        : transport_base(session->verbose), remote_addr(session->remote_addr)
+    {
+    }
+
+    udp_client(struct sockaddr_in remote_addr, bool verbose = false)
+        : transport_base(verbose), remote_addr(remote_addr)
     {
     }
 

@@ -9,8 +9,13 @@ private:
     struct sockaddr_in remote_addr;
 
 public:
-    tcp_client(struct sockaddr_in remote_addr)
-        : remote_addr(remote_addr)
+    tcp_client(struct session* session)
+        : transport_base(session->verbose), tcp_base(session->omit_length), remote_addr(session->remote_addr)
+    {
+    }
+
+    tcp_client(struct sockaddr_in remote_addr, bool omit_length = false, bool verbose = false)
+        : transport_base(verbose), tcp_base(omit_length), remote_addr(remote_addr)
     {
     }
 

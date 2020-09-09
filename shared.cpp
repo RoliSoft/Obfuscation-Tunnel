@@ -69,6 +69,7 @@ struct session
     int mode;
     int verbose;
     int obfuscate;
+    int omit_length;
 #if HAVE_PCAP
     int pcap;
 #endif
@@ -107,13 +108,19 @@ class transport_base
 public:
     bool started = false;
     bool connected = false;
-    bool verbose = false;
+    bool verbose;
 
     virtual int start() = 0;
     virtual int stop() = 0;
     virtual int send(char *buffer, ssize_t msglen) = 0;
     virtual int receive(char *buffer, int* offset) = 0;
     virtual int get_selectable() { return -1; };
+
+protected:
+    transport_base(bool verbose = false)
+        : verbose(verbose)
+    {
+    }
 };
 
 static void sig_handler(int _)
@@ -256,50 +263,6 @@ int loop_transports_thread(transport_base *local, transport_base *remote, bool o
     remote->stop();
 
     return run ? EXIT_FAILURE : EXIT_SUCCESS;
-}
-
-static inline unsigned short read_14bit(int fd)
-{
-    int shift = 0;
-    unsigned short value = 0;
-    unsigned char current = 0;
-    
-    do
-    {
-        if (shift == 2 * 7) // cap at 16383
-        {
-            printf("Size header seems to be corrupted, abandoning read.\n");
-            break;
-        }
-
-        socklen_t msglen = read(fd, &current, sizeof(unsigned char));
-
-        if (msglen == 0)
-        {
-            // propagate TCP closed event
-            return 0;
-        }
-
-        value |= (current & 0x7f) << shift;
-        shift += 7;
-    }
-    while ((current & 0x80) != 0);
-
-    return value;
-}
-
-static inline void write_14bit(unsigned short size, char* buffer, int* length)
-{
-    *length = 0;
-    unsigned short value = size;
-
-    while (value >= 0x80)
-    {
-        buffer[(*length)++] = value | 0x80;
-        value >>= 7;
-    }
-
-    buffer[(*length)++] = value;
 }
 
 static inline unsigned short ip_checksum(char* data, unsigned int length)
@@ -496,6 +459,8 @@ void print_help(char* argv[])
     printf("   -o\t\tEnable generic header obfuscation.\n");
     printf("   -v\t\tDetailed logging at the expense of decreased throughput.\n");
     printf("   -h\t\tDisplays this message.\n");
+    printf("\nTCP-specific arguments:\n\n");
+    printf("   -n\t\tDo not send and expect 7-bit encoded length header.\n");
     printf("\nICMP-specific arguments:\n\n");
 #if HAVE_PCAP
     printf("   -p [if]\tUse PCAP for inbound, highly recommended.\n   \t\t  Optional value, defaults to default gateway otherwise.\n");
@@ -517,7 +482,7 @@ int parse_arguments(int argc, char* argv[], struct session *s)
     s->local_port = 8080;
 
     int opt;
-    while((opt = getopt(argc, argv, ":hm:l:r:op:vx")) != -1)
+    while((opt = getopt(argc, argv, ":hm:l:r:op:vnx")) != -1)
     {
         if (opt == ':' && optopt != opt)
         {
@@ -576,6 +541,10 @@ int parse_arguments(int argc, char* argv[], struct session *s)
             
             case 'x':
                 s->random_id = 1;
+                break;
+            
+            case 'n':
+                s->omit_length = 1;
                 break;
             
             case 'p':

@@ -1,10 +1,10 @@
 #pragma once
 #include "shared.cpp"
 
-class udp_base : public transport_base
+class udp_base : virtual public transport_base
 {
 public:
-    int _send(int fd, const struct sockaddr *addr, char *buffer, ssize_t msglen)
+    inline int _send(int fd, const struct sockaddr *addr, char *buffer, ssize_t msglen)
     {
         int res = sendto(fd, (char*)buffer, msglen, 0, addr, IP_SIZE);
 
@@ -16,7 +16,7 @@ public:
         return res;
     }
 
-    int _receive(int fd, struct sockaddr *addr, char *buffer, int* offset)
+    inline int _receive(int fd, struct sockaddr *addr, char *buffer, int* offset)
     {
         socklen_t addrlen = IP_SIZE;
         ssize_t msglen = recvfrom(fd, (char*)buffer, MTU_SIZE, MSG_WAITALL, addr, &addrlen);

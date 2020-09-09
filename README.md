@@ -179,6 +179,14 @@ TCP packets start with a length-value, a 16-bit unsigned field that is of variab
 
 In its current form, the variable encoding will place 1 byte in the payload for lengths up to 127 bytes, 2 bytes to represent lengths up to 16,383, and caps out at 3-bytes for values of up to 32,767. As the MTU for an UDP packet over the internet generally does not exceed 1,500 bytes, capping out at 32k should not be a problem by far. (However, the cap can be easily extended by modifying the source code, as the underlying encoding scheme supports any sizes.)
 
+### Headerless forwarding
+
+It is possible to turn off the 7-bit encoded length prepended to TCP packets using the `-n` flag. This allows for native forwarding from UDP to TCP or TCP to UDP without needing a second intermediary tunnel from the application to strip off the length header.
+
+For UDP-based protocols, using UDP to TCP to UDP, however, turning off the length header will result in the UDP packets not being correctly reassembled on the gateway due to fragmentation occuring at the TCP stage, that the gateway server will not be aware of.
+
+In this case, it depends on the application consuming the UDP packets whether it can consume fragmented and/or merged UDP packets. For Wireguard, the connection will mostly be stable, but some performance degradation will occur, as when the header does not align to be the very first byte in the UDP packet, Wireguard will drop it.
+
 ## ICMP tunneling
 
 The application supports bi-directional forwarding of UDP packets disguised as an ICMP ping/reply stream. Although this method can work perfectly and produce a high throughput (see Benchmark section), there are a few caveats you should be aware of, and take into consideration before reaching for the ICMP tunnels.

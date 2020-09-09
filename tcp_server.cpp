@@ -9,8 +9,13 @@ private:
     struct sockaddr_in local_addr, client_addr;
 
 public:
-    tcp_server(struct sockaddr_in local_addr)
-        : local_addr(local_addr)
+    tcp_server(struct session* session)
+        : transport_base(session->verbose), tcp_base(session->omit_length), local_addr(session->local_addr)
+    {
+    }
+
+    tcp_server(struct sockaddr_in local_addr, bool omit_length = false, bool verbose = false)
+        : transport_base(verbose), tcp_base(omit_length), local_addr(local_addr)
     {
     }
 
