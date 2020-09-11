@@ -5,6 +5,9 @@ class icmp6_base : virtual public transport_base
 {
 public:
     bool pcap = false;
+    pcap_t *cap_ptr;
+    char *cap_dev;
+
     bool random_id = false;
     int sequence = 0;
     int identifier = 0;
@@ -75,8 +78,8 @@ public:
     }
 
 protected:
-    icmp6_base(bool pcap = false, bool random_id = false)
-        : pcap(pcap), random_id(random_id)
+    icmp6_base(bool pcap = false, char *cap_dev = NULL, bool random_id = false)
+        : pcap(pcap), cap_dev(cap_dev), random_id(random_id)
     {
     }
 };
