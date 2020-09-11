@@ -64,6 +64,12 @@ public:
 
         if (this->verbose) printf("Received %zd bytes from remote\n", msglen - ICMP_SKIP);
 
+        if (reply)
+        {
+            if (this->random_id) this->identifier = ntohs(*((unsigned short*)&buffer[IPHDR_LEN + ICMP_ID_OFFSET]));
+            this->sequence = ntohs(*((unsigned short*)&buffer[IPHDR_LEN + ICMP_SEQ_OFFSET]));
+        }
+
         *offset = ICMP_SKIP;
         return msglen - ICMP_SKIP;
     }

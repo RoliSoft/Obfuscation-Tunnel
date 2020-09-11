@@ -1,4 +1,6 @@
 #include "shared.cpp"
+#include "udp_server.cpp"
+#include "icmp6_client.cpp"
 
 int udp_icmp6_server_to_remote_loop(struct session *s)
 {
@@ -159,6 +161,14 @@ int udp_icmp6_remote_to_server_pcap_loop(struct session *s)
 
 int udp_icmp6_tunnel(struct session *s)
 {
+    auto local = new udp_server(s);
+    auto remote = new icmp6_client(s);
+
+    loop_transports_thread(local, remote, s->obfuscate);
+    
+    return 0;
+
+/*
     if ((s->server_fd = socket(AF_INET, SOCK_DGRAM, 0)) < 0)
     { 
         perror("server socket creation failed");
@@ -303,4 +313,5 @@ int udp_icmp6_tunnel(struct session *s)
     close(s->remote_fd);
 
     return 0;
+*/
 }
