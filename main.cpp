@@ -1,46 +1,16 @@
-#include "shared.cpp"
-#include "udp_udp_tunnel.cpp"
-#include "udp_tcp_tunnel.c"
-#include "tcp_udp_tunnel.c"
-#include "udp_icmp_tunnel.c"
-#include "icmp_udp_tunnel.c"
-#include "udp_icmp6_tunnel.c"
-#include "icmp6_udp_tunnel.c"
+#include "factory.cpp"
 
 int main(int argc, char* argv[])
 {
     signal(SIGINT, sig_handler);
 
-    struct session s;
+    struct session session;
 
-    int ret = parse_arguments(argc, argv, &s);
+    int ret = parse_arguments(argc, argv, &session);
     if (ret == EXIT_SUCCESS || ret == EXIT_FAILURE)
     {
         return ret;
     }
 
-    switch (s.mode)
-    {
-        default:
-        case MODE_UDP_UDP:
-            return udp_udp_tunnel(&s);
-
-        case MODE_UDP_TCP:
-            return udp_tcp_tunnel(&s);
-
-        case MODE_TCP_UDP:
-            return tcp_udp_tunnel(&s);
-
-        case MODE_UDP_ICMP:
-            return udp_icmp_tunnel(&s);
-
-        case MODE_ICMP_UDP:
-            return icmp_udp_tunnel(&s);
-
-        case MODE_UDP_ICMP6:
-            return udp_icmp6_tunnel(&s);
-
-        case MODE_ICMP6_UDP:
-            return icmp6_udp_tunnel(&s);
-    }
+    return run_session(&session);
 }

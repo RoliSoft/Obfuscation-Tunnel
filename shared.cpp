@@ -31,13 +31,10 @@
     #include <pcap/pcap.h>
 #endif
 
-#define MODE_UDP_UDP 0
-#define MODE_UDP_TCP 1
-#define MODE_TCP_UDP 2
-#define MODE_UDP_ICMP 3
-#define MODE_ICMP_UDP 4
-#define MODE_UDP_ICMP6 5
-#define MODE_ICMP6_UDP 6
+#define PROTO_UDP 0
+#define PROTO_TCP 1
+#define PROTO_ICMP 2
+#define PROTO_ICMP6 3
 #define MTU_SIZE 1500
 
 #define IP_SIZE sizeof(struct sockaddr_in)
@@ -68,21 +65,23 @@ static std::vector<pcap_t*> pcaps = std::vector<pcap_t*>();
 struct session
 {
     // boolean flags
-    int mode;
     bool verbose;
     bool obfuscate;
     bool omit_length;
     bool random_id;
+    bool no_threading;
 #if HAVE_PCAP
     bool pcap;
     char *cap_dev;
 #endif
 
     // local server configured with -l
+    int local_proto;
     struct sockaddr_in local_addr;
     char __local_addr_pad[IP6_SIZE - IP_SIZE];
 
     // remote gateway or end server configured with -r
+    int remote_proto;
     struct sockaddr_in remote_addr;
     char __remote_addr_pad[IP6_SIZE - IP_SIZE];
 };
@@ -462,8 +461,8 @@ void print_help(char* argv[])
     printf("usage: %s -r addr:port [args]\narguments:\n\n", argv[0]);
     printf("   -r addr:port\tRemote host to tunnel packets to.\n");
     printf("   -l addr:port\tLocal listening address and port.\n   \t\t  Optional, defaults to 127.0.0.1:8080\n");
-    printf("   -m mode\tOperation mode. Possible values:\n   \t\t  uu - UDP-to-UDP (Default)\n   \t\t  ut - UDP-to-TCP\n   \t\t  tu - TCP-to-UDP\n   \t\t  ui - UDP-to-ICMP (Requires root)\n   \t\t  iu - ICMP-to-UDP (Requires root)\n   \t\t  ui6 - UDP-to-ICMPv6 (Requires root)\n   \t\t  i6u - ICMPv6-to-UDP (Requires root)\n");
     printf("   -o\t\tEnable generic header obfuscation.\n");
+    printf("   -s\t\tDisable multithreading, multiplex sockets instead.\n");
     printf("   -v\t\tDetailed logging at the expense of decreased throughput.\n");
     printf("   -h\t\tDisplays this message.\n");
     printf("\nTCP-specific arguments:\n\n");
@@ -475,10 +474,81 @@ void print_help(char* argv[])
     printf("   -x\t\tExpect identifier and sequence randomization.\n   \t\t  Not recommended, see documentation for pros and cons.\n");
 }
 
+int parse_protocol_tag(char *tag)
+{
+    for (char *c = tag; *c; c++)
+    {
+        *c = tolower(*c);
+    }
+
+    if (strcmp(tag, "udp") == 0)
+    {
+        return PROTO_UDP;
+    }
+    else if (strcmp(tag, "tcp") == 0)
+    {
+        return PROTO_TCP;
+    }
+    else if (strcmp(tag, "icmp") == 0)
+    {
+        return PROTO_ICMP;
+    }
+    else if (strcmp(tag, "icmp6") == 0)
+    {
+        return PROTO_ICMP6;
+    }
+    else
+    {
+        fprintf(stderr, "'%s' is not a supported protocol.\n", tag);
+        return -1;
+    }
+}
+
+int parse_endpoint_arg(char* argument, int *proto_dest, struct sockaddr_in *addr_dest)
+{
+    char* token = strtok(argument, ":");
+    int proto = parse_protocol_tag(token);
+
+    if (proto == -1)
+    {
+        return EXIT_FAILURE;
+    }
+
+    *proto_dest = proto;
+    
+    token = strtok(NULL, ":");
+
+    if (proto == PROTO_ICMP6)
+    {
+        if (resolve_host6(token, (struct sockaddr_in6*)addr_dest) != 0)
+        {
+            return EXIT_FAILURE;
+        }
+    }
+    else
+    {
+        if (resolve_host(token, addr_dest) != 0)
+        {
+            return EXIT_FAILURE;
+        }
+    }
+
+    token = strtok(NULL, ":");
+    int port = token != NULL
+        ? strtoul(token, NULL, 0)
+        : 0;
+    
+    if (port != 0)
+    {
+        addr_dest->sin_port = htons(port);
+    }
+
+    return EXIT_SUCCESS;
+}
+
 int parse_arguments(int argc, char* argv[], struct session *s)
 {
-    char *token, *localhost = NULL, *remotehost = NULL;
-    int local_port = 8080, remote_port;
+    char *localhost = NULL, *remotehost = NULL;
 
     if (argc == 1)
     {
@@ -489,7 +559,7 @@ int parse_arguments(int argc, char* argv[], struct session *s)
     memset(s, 0, sizeof(*s));
 
     int opt;
-    while((opt = getopt(argc, argv, ":hm:l:r:op:vnx")) != -1)
+    while((opt = getopt(argc, argv, ":hl:r:op:svnx")) != -1)
     {
         if (opt == ':' && optopt != opt)
         {
@@ -502,44 +572,12 @@ int parse_arguments(int argc, char* argv[], struct session *s)
                 print_help(argv);
                 return EXIT_SUCCESS;
 
-            case 'm':
-                if (strcmp(optarg, "uu") == 0)
-                {
-                    s->mode = MODE_UDP_UDP;
-                }
-                else if (strcmp(optarg, "ut") == 0)
-                {
-                    s->mode = MODE_UDP_TCP;
-                }
-                else if (strcmp(optarg, "tu") == 0)
-                {
-                    s->mode = MODE_TCP_UDP;
-                }
-                else if (strcmp(optarg, "ui") == 0)
-                {
-                    s->mode = MODE_UDP_ICMP;
-                }
-                else if (strcmp(optarg, "iu") == 0)
-                {
-                    s->mode = MODE_ICMP_UDP;
-                }
-                else if (strcmp(optarg, "ui6") == 0)
-                {
-                    s->mode = MODE_UDP_ICMP6;
-                }
-                else if (strcmp(optarg, "i6u") == 0)
-                {
-                    s->mode = MODE_ICMP6_UDP;
-                }
-                else
-                {
-                    fprintf(stderr, "Unrecognized operating mode in flag -m.\n");
-                    return EXIT_FAILURE;
-                }
-                break;
-
             case 'v':
                 s->verbose = true;
+                break;
+            
+            case 's':
+                s->no_threading = true;
                 break;
             
             case 'o':
@@ -578,80 +616,20 @@ int parse_arguments(int argc, char* argv[], struct session *s)
         }
     }
 
-    if (remotehost != NULL)
+    if (localhost == NULL || remotehost == NULL)
     {
-        if (s->mode == MODE_UDP_ICMP6)
-        {
-            if (resolve_host6(remotehost, (struct sockaddr_in6*)&s->remote_addr) != 0)
-            {
-                return EXIT_FAILURE;
-            }
-        }
-        else
-        {
-            token = strtok(remotehost, ":");
-            if (resolve_host(token, &s->remote_addr) != 0)
-            {
-                return EXIT_FAILURE;
-            }
-
-            token = strtok(NULL, ":");
-            remote_port = token != NULL
-                ? strtoul(token, NULL, 0)
-                : 0;
-
-            s->remote_addr.sin_port = htons(remote_port);
-        }
-    }
-    else
-    {
-        fprintf(stderr, "You need to declare a remote host and port with -r.\n");
+        fprintf(stderr, "You need to declare a local and remote endpoint with -l and -r.\n");
         return EXIT_FAILURE;
     }
 
-    if (localhost != NULL)
+    if (parse_endpoint_arg(remotehost, &s->remote_proto, &s->remote_addr) != EXIT_SUCCESS)
     {
-        if (s->mode == MODE_ICMP6_UDP)
-        {
-            if (resolve_host6(localhost, (struct sockaddr_in6*)&s->local_addr) != 0)
-            {
-                return EXIT_FAILURE;
-            }
-        }
-        else
-        {
-            token = strtok(localhost, ":");
-            if (resolve_host(token, &s->local_addr) != 0)
-            {
-                return EXIT_FAILURE;
-            }
-
-            token = strtok(NULL, ":");
-            local_port = token != NULL
-                ? strtoul(token, NULL, 0)
-                : 0;
-
-            s->local_addr.sin_port = htons(local_port);
-        }
+        return EXIT_FAILURE;
     }
-    else
-    {
-        switch (s->mode)
-        {
-            case MODE_ICMP_UDP:
-                resolve_host("0.0.0.0", &s->local_addr);
-                break;
-            
-            case MODE_ICMP6_UDP:
-                resolve_host6("::", (struct sockaddr_in6*)&s->local_addr);
-                break;
-            
-            default:
-                resolve_host("127.0.0.1", &s->local_addr);
-                break;
-        }
 
-        s->local_addr.sin_port = htons(local_port);
+    if (parse_endpoint_arg(localhost, &s->local_proto, &s->local_addr) != EXIT_SUCCESS)
+    {
+        return EXIT_FAILURE;
     }
 
     return -1;
