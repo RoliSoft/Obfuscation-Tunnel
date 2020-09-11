@@ -192,18 +192,24 @@ int loop_transports_select(transport_base *local, transport_base *remote, bool o
         {
             msglen = local->receive(buffer + MTU_SIZE, &offset);
 
-            if (obfuscate) obfuscate_message(buffer + MTU_SIZE + offset, msglen);
+            if (msglen > 0)
+            {
+                if (obfuscate) obfuscate_message(buffer + MTU_SIZE + offset, msglen);
 
-            remote->send(buffer + MTU_SIZE + offset, msglen);
+                remote->send(buffer + MTU_SIZE + offset, msglen);
+            }
         }
 
         if (fds[1].revents == POLLIN)
         {
             msglen = remote->receive(buffer + MTU_SIZE, &offset);
 
-            if (obfuscate) obfuscate_message(buffer  + MTU_SIZE+ offset, msglen);
+            if (msglen > 0)
+            {
+                if (obfuscate) obfuscate_message(buffer  + MTU_SIZE+ offset, msglen);
 
-            local->send(buffer + MTU_SIZE + offset, msglen);
+                local->send(buffer + MTU_SIZE + offset, msglen);
+            }
         }
     }
 
@@ -234,6 +240,11 @@ int loop_transports_thread(transport_base *local, transport_base *remote, bool o
         {
             msglen = local->receive(buffer + MTU_SIZE, &offset);
 
+            if (msglen < 1)
+            {
+                continue;
+            }
+
             if (obfuscate) obfuscate_message(buffer + MTU_SIZE + offset, msglen);
 
             remote->send(buffer + MTU_SIZE + offset, msglen);
@@ -247,6 +258,11 @@ int loop_transports_thread(transport_base *local, transport_base *remote, bool o
         while (run)
         {
             msglen = remote->receive(buffer + MTU_SIZE, &offset);
+
+            if (msglen < 1)
+            {
+                continue;
+            }
 
             if (obfuscate) obfuscate_message(buffer + MTU_SIZE + offset, msglen);
 
