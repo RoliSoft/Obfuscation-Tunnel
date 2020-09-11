@@ -108,7 +108,7 @@ public:
             }
 
             struct sock_fprog linux_bpf = {
-                .len = bpf.bf_len,
+                .len = (u_short)bpf.bf_len,
                 .filter = (struct sock_filter *)bpf.bf_insns,
             };
 

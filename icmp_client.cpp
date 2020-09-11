@@ -65,11 +65,11 @@ public:
             char *bpf_filter;
             if (this->random_id)
             {
-                bpf_filter = "icmp[icmptype] == icmp-echoreply";
+                bpf_filter = (char*)"icmp[icmptype] == icmp-echoreply";
             }
             else
             {
-                bpf_filter = "icmp[icmptype] == icmp-echoreply and icmp[4] == 0x13 and icmp[5] = 0x37";
+                bpf_filter = (char*)"icmp[icmptype] == icmp-echoreply and icmp[4] == 0x13 and icmp[5] = 0x37";
             }
 
             if (pcap_compile(this->cap_ptr, &fp, bpf_filter, 0, 0) == -1)
@@ -99,11 +99,11 @@ public:
             char *bpf_filter;
             if (this->random_id)
             {
-                bpf_filter = "ether[20] == 0x00";
+                bpf_filter = (char*)"ether[20] == 0x00";
             }
             else
             {
-                bpf_filter = "ether[20] == 0x00 && ether[24] == 0x13 && ether[25] == 0x37";
+                bpf_filter = (char*)"ether[20] == 0x00 && ether[24] == 0x13 && ether[25] == 0x37";
             }
 
             if (pcap_compile(this->cap_ptr, &bpf, bpf_filter, 0, PCAP_NETMASK_UNKNOWN) == -1)
@@ -113,7 +113,7 @@ public:
             }
 
             struct sock_fprog linux_bpf = {
-                .len = bpf.bf_len,
+                .len = (u_short)bpf.bf_len,
                 .filter = (struct sock_filter *)bpf.bf_insns,
             };
 

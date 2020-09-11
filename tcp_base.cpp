@@ -104,7 +104,7 @@ protected:
 
                 if (this->verbose && toread != msglen)
                 {
-                    printf("Read partially, need %ld more bytes.\n", toread - msglen);
+                    printf("Read partially, need %d more bytes.\n", (int)(toread - msglen));
                 }
 
                 toread -= msglen;
