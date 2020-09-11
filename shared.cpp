@@ -69,40 +69,22 @@ struct session
 {
     // boolean flags
     int mode;
-    int verbose;
-    int obfuscate;
-    int omit_length;
+    bool verbose;
+    bool obfuscate;
+    bool omit_length;
+    bool random_id;
 #if HAVE_PCAP
-    int pcap;
+    bool pcap;
+    char *cap_dev;
 #endif
 
     // local server configured with -l
     struct sockaddr_in local_addr;
     char __local_addr_pad[IP6_SIZE - IP_SIZE];
-    int local_port;
-    int server_fd;
 
     // remote gateway or end server configured with -r
     struct sockaddr_in remote_addr;
     char __remote_addr_pad[IP6_SIZE - IP_SIZE];
-    int remote_port;
-    int remote_fd;
-
-    // address of the connecting client to local server
-    struct sockaddr_in client_addr;
-    char __client_addr_pad[IP6_SIZE - IP_SIZE];
-    int client_fd;
-
-    // protocol-dependent stateful variables
-    int connected;
-    unsigned short identifier;
-    unsigned short sequence;
-    int random_id;
-
-#if HAVE_PCAP
-    pcap_t *cap_ptr;
-    char *cap_dev;
-#endif
 };
 
 class transport_base
@@ -148,7 +130,6 @@ static void sig_handler(int _)
     for (auto pcap : pcaps)
     {
         pcap_breakloop(pcap);
-        pcap_close(pcap);
     }
 #endif
 }
@@ -497,6 +478,7 @@ void print_help(char* argv[])
 int parse_arguments(int argc, char* argv[], struct session *s)
 {
     char *token, *localhost = NULL, *remotehost = NULL;
+    int local_port = 8080, remote_port;
 
     if (argc == 1)
     {
@@ -505,7 +487,6 @@ int parse_arguments(int argc, char* argv[], struct session *s)
     }
 
     memset(s, 0, sizeof(*s));
-    s->local_port = 8080;
 
     int opt;
     while((opt = getopt(argc, argv, ":hm:l:r:op:vnx")) != -1)
@@ -558,24 +539,24 @@ int parse_arguments(int argc, char* argv[], struct session *s)
                 break;
 
             case 'v':
-                s->verbose = 1;
+                s->verbose = true;
                 break;
             
             case 'o':
-                s->obfuscate = 1;
+                s->obfuscate = true;
                 break;
             
             case 'x':
-                s->random_id = 1;
+                s->random_id = true;
                 break;
             
             case 'n':
-                s->omit_length = 1;
+                s->omit_length = true;
                 break;
             
             case 'p':
 #if HAVE_PCAP
-                s->pcap = 1;
+                s->pcap = true;
 
                 if_optional_arg()
                 {
@@ -615,11 +596,11 @@ int parse_arguments(int argc, char* argv[], struct session *s)
             }
 
             token = strtok(NULL, ":");
-            s->remote_port = token != NULL
+            remote_port = token != NULL
                 ? strtoul(token, NULL, 0)
                 : 0;
 
-            s->remote_addr.sin_port = htons(s->remote_port);
+            s->remote_addr.sin_port = htons(remote_port);
         }
     }
     else
@@ -646,11 +627,11 @@ int parse_arguments(int argc, char* argv[], struct session *s)
             }
 
             token = strtok(NULL, ":");
-            s->local_port = token != NULL
+            local_port = token != NULL
                 ? strtoul(token, NULL, 0)
                 : 0;
 
-            s->local_addr.sin_port = htons(s->local_port);
+            s->local_addr.sin_port = htons(local_port);
         }
     }
     else
@@ -670,7 +651,7 @@ int parse_arguments(int argc, char* argv[], struct session *s)
                 break;
         }
 
-        s->local_addr.sin_port = htons(s->local_port);
+        s->local_addr.sin_port = htons(local_port);
     }
 
     return -1;
