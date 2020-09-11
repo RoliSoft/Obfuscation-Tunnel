@@ -4,18 +4,25 @@
 
 class icmp_client : public icmp_base
 {
+public:
+    bool pcap = false;
+    char *cap_dev;
+
 private:
     int fd;
     struct sockaddr_in remote_addr;
+#if HAVE_PCAP
+    pcap_t *cap_ptr;
+#endif
 
 public:
     icmp_client(struct session* session)
-        : transport_base(session->verbose), icmp_base(session->pcap, session->cap_dev, session->random_id), remote_addr(session->remote_addr)
+        : transport_base(session->verbose), icmp_base(session->random_id), pcap(session->pcap), cap_dev(session->cap_dev), remote_addr(session->remote_addr)
     {
     }
 
     icmp_client(struct sockaddr_in remote_addr, bool pcap = false, char *cap_dev = NULL, bool random_id = false, bool verbose = false)
-        : transport_base(verbose), icmp_base(pcap, cap_dev, random_id), remote_addr(remote_addr)
+        : transport_base(verbose), icmp_base(random_id), pcap(pcap), cap_dev(cap_dev), remote_addr(remote_addr)
     {
     }
 
@@ -141,6 +148,13 @@ public:
     {
         close(this->fd);
 
+#if HAVE_PCAP
+        if (this->pcap)
+        {
+            pcap_close(this->cap_ptr);
+        }
+#endif
+
         started = false;
 
         return EXIT_SUCCESS;
@@ -153,11 +167,33 @@ public:
 
     int receive(char *buffer, int* offset)
     {
-        return _receive(this->fd, false, (struct sockaddr*)&this->remote_addr, buffer, offset);
+#if HAVE_PCAP
+        if (this->pcap)
+        {
+            return _receive_pcap(this->cap_ptr, false, &this->remote_addr, buffer, offset);
+        }
+        else
+        {
+#endif
+            return _receive(this->fd, false, (struct sockaddr*)&this->remote_addr, buffer, offset);
+#if HAVE_PCAP
+        }
+#endif
     }
 
     int get_selectable()
     {
-        return this->fd;
+#if HAVE_PCAP
+        if (this->pcap)
+        {
+            return pcap_get_selectable_fd(this->cap_ptr);
+        }
+        else
+        {
+#endif
+            return this->fd;
+#if HAVE_PCAP
+        }
+#endif
     }
 };

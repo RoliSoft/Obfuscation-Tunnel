@@ -4,18 +4,25 @@
 
 class icmp_server : public icmp_base
 {
+public:
+    bool pcap = false;
+    char *cap_dev;
+
 private:
     int fd;
     struct sockaddr_in local_addr, client_addr;
+#if HAVE_PCAP
+    pcap_t *cap_ptr;
+#endif
 
 public:
     icmp_server(struct session* session)
-        : transport_base(session->verbose), icmp_base(session->pcap, session->cap_dev, session->random_id), local_addr(session->local_addr)
+        : transport_base(session->verbose), icmp_base(session->random_id), pcap(session->pcap), cap_dev(session->cap_dev), local_addr(session->local_addr)
     {
     }
 
     icmp_server(struct sockaddr_in local_addr, bool pcap = false, char *cap_dev = NULL, bool random_id = false, bool verbose = false)
-        : transport_base(verbose), icmp_base(pcap, cap_dev, random_id), local_addr(local_addr)
+        : transport_base(verbose), icmp_base(random_id), pcap(pcap), cap_dev(cap_dev), local_addr(local_addr)
     {
     }
 
@@ -139,6 +146,13 @@ public:
     {
         close(this->fd);
 
+#if HAVE_PCAP
+        if (this->pcap)
+        {
+            pcap_close(this->cap_ptr);
+        }
+#endif
+
         started = false;
 
         return EXIT_SUCCESS;
@@ -156,7 +170,20 @@ public:
 
     int receive(char *buffer, int* offset)
     {
-        int res = _receive(this->fd, true, (struct sockaddr*)&this->client_addr, buffer, offset);
+        int res;
+
+#if HAVE_PCAP
+        if (this->pcap)
+        {
+            res = _receive_pcap(this->cap_ptr, true, &this->client_addr, buffer, offset);
+        }
+        else
+        {
+#endif
+            res = _receive(this->fd, true, (struct sockaddr*)&this->client_addr, buffer, offset);
+#if HAVE_PCAP
+        }
+#endif
 
         if (!this->connected && res > 0)
         {
@@ -172,6 +199,17 @@ public:
 
     int get_selectable()
     {
-        return this->fd;
+#if HAVE_PCAP
+        if (this->pcap)
+        {
+            return pcap_get_selectable_fd(this->cap_ptr);
+        }
+        else
+        {
+#endif
+            return this->fd;
+#if HAVE_PCAP
+        }
+#endif
     }
 };

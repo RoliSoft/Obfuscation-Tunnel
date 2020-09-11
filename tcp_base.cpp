@@ -50,6 +50,7 @@ public:
         buffer[(*length)++] = value;
     }
 
+protected:
     inline int _send(int fd, char *buffer, ssize_t msglen)
     {
         int sizelen = 0;

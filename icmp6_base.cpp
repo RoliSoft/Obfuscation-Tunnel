@@ -4,14 +4,11 @@
 class icmp6_base : virtual public transport_base
 {
 public:
-    bool pcap = false;
-    pcap_t *cap_ptr;
-    char *cap_dev;
-
     bool random_id = false;
     int sequence = 0;
     int identifier = 0;
 
+protected:
     inline int _send(int fd, bool reply, const struct sockaddr_in6 *addr, char *buffer, ssize_t msglen)
     {
         *((unsigned short*)&buffer[-ICMP_LEN]) = reply ? 0x81 : 0x80; // type -> echo reply or request
@@ -77,9 +74,48 @@ public:
         return msglen - ICMP6_SKIP;
     }
 
+#if HAVE_PCAP
+    inline int _receive_pcap(pcap_t *ptr, bool reply, struct sockaddr_in6 *addr, char *buffer, int* offset)
+    {
+        const u_char *cap_buffer;
+        struct pcap_pkthdr *cap_data;
+        int res = pcap_next_ex(ptr, &cap_data, &cap_buffer);
+
+        if (res < 1)
+        {
+            if (run && res < 0)
+            {
+                pcap_perror(ptr, "Failed to read ICMPv6 packet with PCAP");
+            }
+
+            return res;
+        }
+
+        if (reply)
+        {
+            if (!this->connected)
+            {
+                memset(addr, 0, sizeof(*addr));
+                addr->sin6_family = AF_INET6;
+                addr->sin6_addr = *((struct in6_addr*)(cap_buffer + ETHHDR_LEN + IP6HDR_SRC_OFFSET));
+            }
+
+            addr->sin6_addr = *((struct in6_addr*)(cap_buffer + ETHHDR_LEN + IP6HDR_SRC_OFFSET));
+
+            if (this->random_id) this->identifier = ntohs(*((unsigned short*)&cap_buffer[ETHHDR_LEN + IP6HDR_LEN + ICMP_ID_OFFSET]));
+            this->sequence = ntohs(*((unsigned short*)&cap_buffer[ETHHDR_LEN + IP6HDR_LEN + ICMP_SEQ_OFFSET]));
+        }
+
+        memcpy(buffer, cap_buffer + PCAP_ICMP6_SKIP, cap_data->caplen - PCAP_ICMP6_SKIP);
+
+        *offset = 0;
+        return cap_data->caplen - PCAP_ICMP6_SKIP;
+    }
+#endif
+
 protected:
-    icmp6_base(bool pcap = false, char *cap_dev = NULL, bool random_id = false)
-        : pcap(pcap), cap_dev(cap_dev), random_id(random_id)
+    icmp6_base(bool random_id = false)
+        : random_id(random_id)
     {
     }
 };

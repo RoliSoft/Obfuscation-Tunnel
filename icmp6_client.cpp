@@ -4,18 +4,25 @@
 
 class icmp6_client : public icmp6_base
 {
+public:
+    bool pcap = false;
+    char *cap_dev;
+
 private:
     int fd;
     struct sockaddr_in6 remote_addr;
+#if HAVE_PCAP
+    pcap_t *cap_ptr;
+#endif
 
 public:
     icmp6_client(struct session* session)
-        : transport_base(session->verbose), icmp6_base(session->pcap, session->cap_dev, session->random_id), remote_addr(*(struct sockaddr_in6*)&session->remote_addr)
+        : transport_base(session->verbose), icmp6_base(session->pcap), pcap(session->pcap), cap_dev(session->cap_dev), remote_addr(*(struct sockaddr_in6*)&session->remote_addr)
     {
     }
 
     icmp6_client(struct sockaddr_in6 remote_addr, bool pcap = false, char *cap_dev = NULL, bool random_id = false, bool verbose = false)
-        : transport_base(verbose), icmp6_base(pcap, cap_dev, random_id), remote_addr(remote_addr)
+        : transport_base(verbose), icmp6_base(random_id), pcap(pcap), cap_dev(cap_dev), remote_addr(remote_addr)
     {
     }
 
@@ -136,6 +143,13 @@ public:
     {
         close(this->fd);
 
+#if HAVE_PCAP
+        if (this->pcap)
+        {
+            pcap_close(this->cap_ptr);
+        }
+#endif
+
         started = false;
 
         return EXIT_SUCCESS;
@@ -148,11 +162,33 @@ public:
 
     int receive(char *buffer, int* offset)
     {
-        return _receive(this->fd, false, (struct sockaddr_in6*)&this->remote_addr, buffer, offset);
+#if HAVE_PCAP
+        if (this->pcap)
+        {
+            return _receive_pcap(this->cap_ptr, false, &this->remote_addr, buffer, offset);
+        }
+        else
+        {
+#endif
+            return _receive(this->fd, false, (struct sockaddr_in6*)&this->remote_addr, buffer, offset);
+#if HAVE_PCAP
+        }
+#endif
     }
 
     int get_selectable()
     {
-        return this->fd;
+#if HAVE_PCAP
+        if (this->pcap)
+        {
+            return pcap_get_selectable_fd(this->cap_ptr);
+        }
+        else
+        {
+#endif
+            return this->fd;
+#if HAVE_PCAP
+        }
+#endif
     }
 };

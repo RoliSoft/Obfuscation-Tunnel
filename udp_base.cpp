@@ -3,7 +3,7 @@
 
 class udp_base : virtual public transport_base
 {
-public:
+protected:
     inline int _send(int fd, const struct sockaddr *addr, char *buffer, ssize_t msglen)
     {
         int res = sendto(fd, buffer, msglen, 0, addr, IP_SIZE);
