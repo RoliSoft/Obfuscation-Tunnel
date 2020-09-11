@@ -59,6 +59,8 @@ public:
                 return EXIT_FAILURE;
             }
 
+            pcaps.push_back(this->cap_ptr);
+
             printf("Device selected for packet capture: %s\n", this->cap_dev);
 
             struct bpf_program fp;
@@ -138,7 +140,7 @@ public:
         print_ip(&this->remote_addr);
         printf("\n");
 
-        sockets2.push_back(this->fd);
+        sockets.push_back(this->fd);
         started = true;
 
         return EXIT_SUCCESS;

@@ -31,7 +31,7 @@ public:
         print_ip_port(&this->remote_addr);
         printf("\n");
 
-        sockets2.push_back(this->fd);
+        sockets.push_back(this->fd);
         started = true;
 
         // todo extract elsewhere?

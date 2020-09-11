@@ -43,7 +43,7 @@ public:
         print_ip_port(&this->local_addr);
         printf("\n");
 
-        sockets2.push_back(this->server_fd);
+        sockets.push_back(this->server_fd);
         started = true;
 
         // todo extract elsewhere?
@@ -65,7 +65,7 @@ public:
             }
         }
 
-        sockets2.push_back(this->client_fd);
+        sockets.push_back(this->client_fd);
         connected = true;
 
         printf("Client connected via TCP from ");

@@ -37,7 +37,7 @@ public:
         print_ip_port(&this->local_addr);
         printf("\n");
 
-        sockets2.push_back(this->fd);
+        sockets.push_back(this->fd);
         started = true;
 
         return EXIT_SUCCESS;

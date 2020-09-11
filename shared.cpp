@@ -60,8 +60,10 @@
 #define if_optional_arg() if (optarg && optarg[0] == '-') { optind--; continue; } else if (optarg)
 
 static volatile sig_atomic_t run = 1;
-static int sockets[10];
-static std::vector<int> sockets2 = std::vector<int>();
+static std::vector<int> sockets = std::vector<int>();
+#if HAVE_PCAP
+static std::vector<pcap_t*> pcaps = std::vector<pcap_t*>();
+#endif
 
 struct session
 {
@@ -136,11 +138,19 @@ static void sig_handler(int _)
     run = 0;
     printf("Exiting...\n");
 
-    for (auto fd : sockets2)
+    for (auto fd : sockets)
     {
         close(fd);
         shutdown(fd, SHUT_RDWR);
     }
+
+#if HAVE_PCAP
+    for (auto pcap : pcaps)
+    {
+        pcap_breakloop(pcap);
+        pcap_close(pcap);
+    }
+#endif
 }
 
 void hexdump(const void* data, size_t size)
