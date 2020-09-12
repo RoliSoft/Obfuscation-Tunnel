@@ -22,6 +22,11 @@ public:
 private:
     int _accept()
     {
+        if (!run)
+        {
+            return EXIT_FAILURE;
+        }
+
         socklen_t addrlen;
         this->client_fd = accept(this->server_fd, (struct sockaddr*)&this->client_addr, &addrlen);
 

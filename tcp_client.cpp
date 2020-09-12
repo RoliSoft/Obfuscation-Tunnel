@@ -22,6 +22,11 @@ public:
 private:
     int _connect()
     {
+        if (!run)
+        {
+            return EXIT_FAILURE;
+        }
+
         int res;
         do
         {
