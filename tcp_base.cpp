@@ -78,7 +78,7 @@ protected:
 
     inline int _receive(int fd, char *buffer, int* offset)
     {
-        unsigned short readsize;
+        int readsize;
 
         if (!this->omit_length)
         {
@@ -87,7 +87,7 @@ protected:
             if (toread == 0)
             {
                 printf("TCP connection to remote lost\n");
-                return EXIT_FAILURE;
+                return -1;
             }
 
             if (toread > MTU_SIZE)
@@ -113,9 +113,15 @@ protected:
         else
         {
             readsize = read(fd, buffer, MTU_SIZE);
+
+            if (readsize < 1)
+            {
+                printf("TCP connection to remote lost\n");
+                return -1;
+            }
         }
 
-        if (this->verbose) printf("Received %hu bytes from remote\n", readsize);
+        if (this->verbose) printf("Received %d bytes from remote\n", readsize);
 
         *offset = 0;
         return readsize;

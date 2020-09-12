@@ -74,8 +74,8 @@ int run_session(struct session *session)
         res = loop_transports_thread(local, remote, session->obfuscate);
     }
 
-    free(local);
-    free(remote);
+    //free(local);
+    //free(remote);
 
     return res;
 }

@@ -19,36 +19,9 @@ public:
     {
     }
 
-    int start()
+private:
+    int _accept()
     {
-        if ((this->server_fd = socket(AF_INET, SOCK_STREAM, 0)) < 0)
-        { 
-            perror("Server socket creation failed");
-            return EXIT_FAILURE;
-        }
-
-        if (bind(this->server_fd, (const struct sockaddr *)&this->local_addr, sizeof(this->local_addr)) < 0)
-        {
-            perror("Bind failed");
-            return EXIT_FAILURE;
-        }
-
-        if (listen(this->server_fd, 1) != 0)
-        {
-            perror("Failed to listen on local port");
-            return EXIT_FAILURE;
-        }
-
-        printf("Started TCP server at ");
-        print_ip_port(&this->local_addr);
-        printf("\n");
-
-        sockets.push_back(this->server_fd);
-        started = true;
-
-        // todo extract elsewhere?
-        printf("Waiting for first client...\n");
-
         socklen_t addrlen;
         this->client_fd = accept(this->server_fd, (struct sockaddr*)&this->client_addr, &addrlen);
 
@@ -81,6 +54,44 @@ public:
         return EXIT_SUCCESS;
     }
 
+public:
+    int start()
+    {
+        if ((this->server_fd = socket(AF_INET, SOCK_STREAM, 0)) < 0)
+        { 
+            perror("Server socket creation failed");
+            return EXIT_FAILURE;
+        }
+
+        if (bind(this->server_fd, (const struct sockaddr *)&this->local_addr, sizeof(this->local_addr)) < 0)
+        {
+            perror("Bind failed");
+            return EXIT_FAILURE;
+        }
+
+        if (listen(this->server_fd, 1) != 0)
+        {
+            perror("Failed to listen on local port");
+            return EXIT_FAILURE;
+        }
+
+        printf("Started TCP server at ");
+        print_ip_port(&this->local_addr);
+        printf("\n");
+
+        sockets.push_back(this->server_fd);
+        started = true;
+
+        printf("Waiting for first client...\n");
+        return _accept();
+    }
+
+    int restart()
+    {
+        printf("Waiting for next client...\n");
+        return _accept();
+    }
+
     int stop()
     {
         close(this->client_fd);
@@ -98,12 +109,31 @@ public:
             return 0;
         }
 
-        return _send(this->client_fd, buffer, msglen);
+        int res = _send(this->client_fd, buffer, msglen);
+
+        if (res < 0)
+        {
+            this->connected = false;
+        }
+
+        return res;
     }
 
     int receive(char *buffer, int* offset)
     {
-        return _receive(this->client_fd, buffer, offset);
+        if (!this->connected)
+        {
+            return 0;
+        }
+
+        int res = _receive(this->client_fd, buffer, offset);
+
+        if (res < 0)
+        {
+            this->connected = false;
+        }
+
+        return res;
     }
 
     int get_selectable()

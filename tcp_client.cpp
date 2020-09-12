@@ -19,31 +19,47 @@ public:
     {
     }
 
-    int start()
+private:
+    int _connect()
     {
-        if ((this->fd = socket(AF_INET, SOCK_STREAM, 0)) < 0)
-        { 
-            perror("Client socket creation failed");
-            return EXIT_FAILURE;
-        }
+        int res;
+        do
+        {
+            if ((this->fd = socket(AF_INET, SOCK_STREAM, 0)) < 0)
+            { 
+                perror("Client socket creation failed");
+                return EXIT_FAILURE;
+            }
 
-        printf("Started TCP client for ");
-        print_ip_port(&this->remote_addr);
-        printf("\n");
+            res = connect(this->fd, (const struct sockaddr *)&this->remote_addr, IP_SIZE);
+
+            if (res == -1)
+            {
+                if (!run)
+                {
+                    return EXIT_FAILURE;
+                }
+                
+                if (errno == ECONNREFUSED)
+                {
+                    close(this->fd);
+                    sleep(1);
+                    continue;
+                }
+                else
+                {
+                    perror("Failed to connect to remote host");
+                    return EXIT_FAILURE;
+                }
+            }
+        }
+        while (res != 0);
 
         sockets.push_back(this->fd);
         started = true;
-
-        // todo extract elsewhere?
-        printf("Connecting...\n");
-
-        if (connect(this->fd, (const struct sockaddr *)&this->remote_addr, IP_SIZE) != 0)
-        {
-            perror("Failed to connect to remote host");
-            return EXIT_FAILURE;
-        }
-
         connected = true;
+
+        printf("Connected.\n");
 
         int i = 1;
         setsockopt(this->fd, IPPROTO_TCP, TCP_NODELAY, (void *)&i, sizeof(i));
@@ -52,6 +68,29 @@ public:
 #endif
 
         return EXIT_SUCCESS;
+    }
+
+public:
+    int start()
+    {
+        printf("Connecting via TCP to ");
+        print_ip_port(&this->remote_addr);
+        printf("... ");
+        fflush(stdout);
+
+        return _connect();
+    }
+
+    int restart()
+    {
+        close(this->fd);
+        
+        printf("Reconnecting via TCP to ");
+        print_ip_port(&this->remote_addr);
+        printf("... ");
+        fflush(stdout);
+
+        return _connect();
     }
 
     int stop()
@@ -65,12 +104,36 @@ public:
 
     int send(char *buffer, ssize_t msglen)
     {
-        return _send(this->fd, buffer, msglen);
+        if (!this->connected)
+        {
+            return 0;
+        }
+
+        int res = _send(this->fd, buffer, msglen);
+
+        if (res < 0)
+        {
+            this->connected = false;
+        }
+
+        return res;
     }
 
     int receive(char *buffer, int* offset)
     {
-        return _receive(this->fd, buffer, offset);
+        if (!this->connected)
+        {
+            return 0;
+        }
+
+        int res = _receive(this->fd, buffer, offset);
+
+        if (res < 0)
+        {
+            this->connected = false;
+        }
+
+        return res;
     }
 
     int get_selectable()

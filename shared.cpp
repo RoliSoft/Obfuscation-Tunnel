@@ -97,7 +97,8 @@ public:
     virtual int stop() = 0;
     virtual int send(char *buffer, ssize_t msglen) = 0;
     virtual int receive(char *buffer, int* offset) = 0;
-    virtual int get_selectable() { return -1; };
+    virtual int get_selectable() { return -1; }
+    virtual int restart() { return -1; }
 
 protected:
     transport_base(bool verbose = false)
@@ -207,11 +208,17 @@ int loop_transports_select(transport_base *local, transport_base *remote, bool o
 
     if (!local->started)
     {
-        local->start();
+        if (local->start() != EXIT_SUCCESS)
+        {
+            return EXIT_FAILURE;
+        }
     }
     if (!remote->started)
     {
-        remote->start();
+        if (remote->start() != EXIT_SUCCESS)
+        {
+            return EXIT_FAILURE;
+        }
     }
 
     fds[0].fd = local->get_selectable();
@@ -235,6 +242,10 @@ int loop_transports_select(transport_base *local, transport_base *remote, bool o
 
                 remote->send(buffer + MTU_SIZE + offset, msglen);
             }
+            else if (msglen < 0)
+            {
+                local->restart();
+            }
         }
 
         if (fds[1].revents == POLLIN)
@@ -246,6 +257,10 @@ int loop_transports_select(transport_base *local, transport_base *remote, bool o
                 if (obfuscate) obfuscate_message(buffer  + MTU_SIZE+ offset, msglen);
 
                 local->send(buffer + MTU_SIZE + offset, msglen);
+            }
+            else if (msglen < 0)
+            {
+                remote->restart();
             }
         }
     }
@@ -262,11 +277,17 @@ int loop_transports_thread(transport_base *local, transport_base *remote, bool o
 
     if (!local->started)
     {
-        local->start();
+        if (local->start() != EXIT_SUCCESS)
+        {
+            return EXIT_FAILURE;
+        }
     }
     if (!remote->started)
     {
-        remote->start();
+        if (remote->start() != EXIT_SUCCESS)
+        {
+            return EXIT_FAILURE;
+        }
     }
 
     threads[0] = std::thread([](transport_base *local, transport_base *remote, bool obfuscate)
@@ -277,8 +298,13 @@ int loop_transports_thread(transport_base *local, transport_base *remote, bool o
         {
             msglen = local->receive(buffer + MTU_SIZE, &offset);
 
-            if (msglen < 1)
+            if (msglen == 0)
             {
+                continue;
+            }
+            else if (msglen < 0)
+            {
+                local->restart();
                 continue;
             }
 
@@ -296,8 +322,13 @@ int loop_transports_thread(transport_base *local, transport_base *remote, bool o
         {
             msglen = remote->receive(buffer + MTU_SIZE, &offset);
 
-            if (msglen < 1)
+            if (msglen == 0)
             {
+                continue;
+            }
+            else if (msglen < 0)
+            {
+                remote->restart();
                 continue;
             }
 
