@@ -1,5 +1,6 @@
 #pragma once
 #include "shared.cpp"
+#include "transport_base.cpp"
 
 class tcp_base : virtual public transport_base
 {

@@ -66,10 +66,12 @@ struct session
 {
     // boolean flags
     bool verbose;
-    bool obfuscate;
     bool omit_length;
     bool random_id;
     bool no_threading;
+    char obfuscate;
+    char *key;
+    int key_length;
 #if HAVE_PCAP
     bool pcap;
     char *cap_dev;
@@ -84,27 +86,6 @@ struct session
     int remote_proto;
     struct sockaddr_in remote_addr;
     char __remote_addr_pad[IP6_SIZE - IP_SIZE];
-};
-
-class transport_base
-{
-public:
-    bool started = false;
-    bool connected = false;
-    bool verbose;
-
-    virtual int start() = 0;
-    virtual int stop() = 0;
-    virtual int send(char *buffer, ssize_t msglen) = 0;
-    virtual int receive(char *buffer, int* offset) = 0;
-    virtual int get_selectable() { return -1; }
-    virtual int restart() { return -1; }
-
-protected:
-    transport_base(bool verbose = false)
-        : verbose(verbose)
-    {
-    }
 };
 
 static void sig_handler(int _)
@@ -179,174 +160,6 @@ void hexdump(const void* data, size_t size)
 			}
 		}
 	}
-}
-
-static inline void obfuscate_message(char* message, int length)
-{
-    int process = min(16, length);
-
-    if (length > 32)
-    {
-        for (int i = 0; i < process; i++)
-        {
-            message[i] ^= 'a' ^ message[i + 16];
-        }
-    }
-    else
-    {
-        for (int i = 0; i < process; i++)
-        {
-            message[i] ^= 'a';
-        }
-    }
-}
-
-int loop_transports_select(transport_base *local, transport_base *remote, bool obfuscate)
-{
-    struct pollfd fds[2];
-    memset(fds, 0 , sizeof(fds));
-
-    if (!local->started)
-    {
-        if (local->start() != EXIT_SUCCESS)
-        {
-            return EXIT_FAILURE;
-        }
-    }
-    if (!remote->started)
-    {
-        if (remote->start() != EXIT_SUCCESS)
-        {
-            return EXIT_FAILURE;
-        }
-    }
-
-    fds[0].fd = local->get_selectable();
-    fds[0].events = POLLIN;
-    fds[1].fd = remote->get_selectable();
-    fds[1].events = POLLIN;
-
-    int msglen, offset;
-    char buffer[MTU_SIZE * 3];
-    while (run)
-    {
-        msglen = poll(fds, 2, 3 * 60 * 1000);
-
-        if (fds[0].revents == POLLIN)
-        {
-            msglen = local->receive(buffer + MTU_SIZE, &offset);
-
-            if (msglen > 0)
-            {
-                if (obfuscate) obfuscate_message(buffer + MTU_SIZE + offset, msglen);
-
-                remote->send(buffer + MTU_SIZE + offset, msglen);
-            }
-            else if (msglen < 0)
-            {
-                local->restart();
-            }
-        }
-
-        if (fds[1].revents == POLLIN)
-        {
-            msglen = remote->receive(buffer + MTU_SIZE, &offset);
-
-            if (msglen > 0)
-            {
-                if (obfuscate) obfuscate_message(buffer  + MTU_SIZE+ offset, msglen);
-
-                local->send(buffer + MTU_SIZE + offset, msglen);
-            }
-            else if (msglen < 0)
-            {
-                remote->restart();
-            }
-        }
-    }
-
-    local->stop();
-    remote->stop();
-
-    return run ? EXIT_FAILURE : EXIT_SUCCESS;
-}
-
-int loop_transports_thread(transport_base *local, transport_base *remote, bool obfuscate)
-{
-    std::thread threads[2];
-
-    if (!local->started)
-    {
-        if (local->start() != EXIT_SUCCESS)
-        {
-            return EXIT_FAILURE;
-        }
-    }
-    if (!remote->started)
-    {
-        if (remote->start() != EXIT_SUCCESS)
-        {
-            return EXIT_FAILURE;
-        }
-    }
-
-    threads[0] = std::thread([](transport_base *local, transport_base *remote, bool obfuscate)
-    {
-        int msglen, offset;
-        char buffer[MTU_SIZE * 3];
-        while (run)
-        {
-            msglen = local->receive(buffer + MTU_SIZE, &offset);
-
-            if (msglen == 0)
-            {
-                continue;
-            }
-            else if (msglen < 0)
-            {
-                local->restart();
-                continue;
-            }
-
-            if (obfuscate) obfuscate_message(buffer + MTU_SIZE + offset, msglen);
-
-            remote->send(buffer + MTU_SIZE + offset, msglen);
-        }
-    }, std::cref(local), std::cref(remote), std::cref(obfuscate));
-
-    threads[1] = std::thread([](transport_base *local, transport_base *remote, bool obfuscate)
-    {
-        int msglen, offset;
-        char buffer[MTU_SIZE * 3];
-        while (run)
-        {
-            msglen = remote->receive(buffer + MTU_SIZE, &offset);
-
-            if (msglen == 0)
-            {
-                continue;
-            }
-            else if (msglen < 0)
-            {
-                remote->restart();
-                continue;
-            }
-
-            if (obfuscate) obfuscate_message(buffer + MTU_SIZE + offset, msglen);
-
-            local->send(buffer + MTU_SIZE + offset, msglen);
-        }
-    }, std::cref(local), std::cref(remote), std::cref(obfuscate));
-
-    for (int i = 0; i < 2; i++)
-    {
-        threads[i].join();  
-    }
-
-    local->stop();
-    remote->stop();
-
-    return run ? EXIT_FAILURE : EXIT_SUCCESS;
 }
 
 static inline unsigned short ip_checksum(char* data, unsigned int length)
@@ -490,15 +303,16 @@ int resolve_host6(const char *addr, struct sockaddr_in6 *sockaddr)
 void print_help(char* argv[])
 {
     printf("usage: %s -r addr:port [args]\narguments:\n\n", argv[0]);
-    printf("   -r addr:port\tRemote host to tunnel packets to.\n");
-    printf("   -l addr:port\tLocal listening address and port.\n   \t\t  Optional, defaults to 127.0.0.1:8080\n");
-    printf("   -o\t\tEnable generic header obfuscation.\n");
+    printf("   -l endpoint\tLocal listening protocol, address and port.\n   \t\t  Example: tcp:127.0.0.1:80 / icmp6:[::1]\n   \t\t  Supported protocols: udp, tcp, icmp, imcp6.\n");
+    printf("   -r endpoint\tRemote host to tunnel packets to.\n");
+    printf("   -o [mode]\tEnable packet obfuscation. Possible values:\n   \t\t  s - Simple generic header obfuscation (Default)\n   \t\t  x - XOR packet with key specified in -k\n");
+    printf("   -k key\tSpecifies a key for the obfuscator module.\n");
     printf("   -s\t\tDisable multithreading, multiplex sockets instead.\n");
     printf("   -v\t\tDetailed logging at the expense of decreased throughput.\n");
     printf("   -h\t\tDisplays this message.\n");
     printf("\nTCP-specific arguments:\n\n");
     printf("   -n\t\tDo not send and expect 7-bit encoded length header.\n");
-    printf("\nICMP-specific arguments:\n\n");
+    printf("\nICMP/ICMPv6-specific arguments:\n\n");
 #if HAVE_PCAP
     printf("   -p [if]\tUse PCAP for inbound, highly recommended.\n   \t\t  Optional value, defaults to default gateway otherwise.\n");
 #endif
@@ -638,7 +452,7 @@ int parse_arguments(int argc, char* argv[], struct session *s)
     memset(s, 0, sizeof(*s));
 
     int opt;
-    while((opt = getopt(argc, argv, ":hl:r:op:svnx")) != -1)
+    while((opt = getopt(argc, argv, ":hl:r:o:p:sk:vnx")) != -1)
     {
         if (opt == ':' && optopt != opt)
         {
@@ -660,7 +474,12 @@ int parse_arguments(int argc, char* argv[], struct session *s)
                 break;
             
             case 'o':
-                s->obfuscate = true;
+                s->obfuscate = 's';
+
+                if_optional_arg()
+                {
+                    s->obfuscate = optarg[0];
+                }
                 break;
             
             case 'x':
@@ -691,6 +510,11 @@ int parse_arguments(int argc, char* argv[], struct session *s)
 
             case 'r':
                 remotehost = optarg;
+                break;
+
+            case 'k':
+                s->key = optarg;
+                s->key_length = strlen(optarg);
                 break;
         }
     }
