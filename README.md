@@ -8,25 +8,26 @@ The purpose of this project is two-fold:
 ## Usage
 
 ```
-usage: ./tunnel -r addr:port [args]
+usage: ./tunnel -l proto:addr:port -r proto:addr:port [args]
 arguments:
 
-   -r addr:port Remote host to tunnel packets to.
-   -l addr:port Local listening address and port.
-                  Optional, defaults to 127.0.0.1:8080
-   -m mode      Operation mode. Possible values:
-                  uu - UDP-to-UDP (Default)
-                  ut - UDP-to-TCP
-                  tu - TCP-to-UDP
-                  ui - UDP-to-ICMP (Requires root)
-                  iu - ICMP-to-UDP (Requires root)
-                  ui6 - UDP-to-ICMPv6 (Requires root)
-                  i6u - ICMPv6-to-UDP (Requires root)
-   -o           Enable generic header obfuscation.
+   -l endpoint  Local listening protocol, address and port.
+                  Example: tcp:127.0.0.1:80 / icmp6:[::1]
+                  Supported protocols: udp, tcp, icmp, imcp6.
+   -r endpoint  Remote host to tunnel packets to.
+   -o [mode]    Enable packet obfuscation. Possible values:
+                  s - Simple generic header obfuscation (Default)
+                  x - XOR packet obfuscation with rolling key
+   -k key       Specifies a key for the obfuscator module.
+   -s           Disable multithreading, multiplex sockets instead.
    -v           Detailed logging at the expense of decreased throughput.
    -h           Displays this message.
 
-ICMP-specific arguments:
+TCP-specific arguments:
+
+   -n           Do not send and expect 7-bit encoded length header.
+
+ICMP/ICMPv6-specific arguments:
 
    -p [if]      Use PCAP for inbound, highly recommended.
                   Optional value, defaults to default gateway otherwise.
@@ -37,8 +38,8 @@ ICMP-specific arguments:
 Example for UDP-to-UDP tunnel:
 
 ```
-server$ ./tunnel -l 0.0.0.0:80 -r engage.cloudflareclient.com:2408 -m uu
-client$ ./tunnel -r server:80 -l 127.0.0.1:2408 -m uu
+server$ ./tunnel -l udp:0.0.0.0:80 -r udp:engage.cloudflareclient.com:2408
+client$ ./tunnel -r udp:server:80 -l udp:127.0.0.1:2408
 ```
 
 For this example, any packet sent to 127.0.0.1:2408 will be forwarded to server:80, which will further forward it to engage.cloudflareclient.com:2408. Replies will be forwarded backwards through the chain to the last client which sent a valid UDP packet. In essence, the only modification you will need to do to your Wireguard config to go through the tunnel is to replace:
@@ -91,7 +92,7 @@ If you wish to build without libpcap:
 
 * Skip the installation of the `libpcap` dependency.
 * Open the `Makefile` file in your editor,
-* Find the `CFLAGS` line (should be the first),
+* Find the `CXXFLAGS` line (should be the first),
 * Replace the flags `-DHAVE_PCAP=1 -lpcap` with `-DHAVE_PCAP=0`
 
 ## Tunneling VPN traffic
@@ -144,14 +145,22 @@ This will make sure your tunnel traffic will not be hijacked once the VPN is con
 
 ## Obfuscation
 
-In the current version, obfuscation can be turned on with the `-o` flag. As it was specifically designed to disguise Wireguard headers, the algorithm used proceeds as follows:
+Since the modular rewrite of the application, multiple obfuscation methods can be selected. Obfuscation can be turned on by specifying the `-o` flag, this will result in the selection of the "simple generic header obfuscation" module with its built-in key.
 
-* XORs the first 16 bytes of the UDP packet with a key.
-* As the first 16 bytes of a Wireguard header contains 3 reserved always-zero bytes, and two more 32-bit counters (sender, receiver index) whose most significant bytes are mostly zero (especially at the beginning of the connection), in order to avoid fingerprinting by looking at the known gaps being XOR'd to the same value from the key, if the packet is long enough (>32 bytes), the next 16 bytes will be XOR'd into the first 16 bytes. In Wireguard, the next 16 bytes are already encrypted data, which means the packet's header will be not have static bytes where zero would be otherwise.
+Specifying a value for the `-o` flag allows selecting a different module, and the `-k` flag can be used to overwrite the built-in key for the selected module, which is highly recommended, but made optional for ease of use. (Note that the module is called "obfuscator" and not "military-grade encryptor", since its purpose is to try and mask the underlying traffic from automatic fingerprinting, not to encrypt sensitive data.)
+
+### Simple generic header obfuscation
+
+This is the default module, but also selectable with `-o s` explicitly. As it was specifically designed to disguise Wireguard headers, the algorithm used proceeds as follows:
+
+* XORs the first 16 bytes of the UDP packet with a built-in key _or_ a one-byte key provided through `-k`.
+* As the first 16 bytes of a Wireguard header contain 3 reserved always-zero bytes, and two more 32-bit counters (sender, receiver index) whose most significant bytes are mostly zero (especially at the beginning of the connection), in order to avoid fingerprinting by looking at the known gaps being XOR'd to the same value from the key, if the packet is long enough (>32 bytes), the next 16 bytes will be XOR'd into the first 16 bytes. In Wireguard, the next 16 bytes are already encrypted data, which means the packet's header will be not have static bytes where zero would be otherwise.
 
 As Wireguard already does a great job of encrypting the traffic, the whole packet is not XOR'd, only the header, and only for masking purposes.
 
-If you find that the algorithm being used in this application has been implemented in the firewall, and your packets are identified, you may tweak the algorithm to your liking in `shared.c` function `obfuscate_message()`.
+### XOR obfuscation
+
+This module is selectable with `-o x` and simply XORs the whole data stream with the built-in key or the one specified with `-k`. The size of the key can be any number of bytes up to 1,500. If the packet is larger than the key, the key will be repeated.
 
 If you would like to identify the packets as something else in the firewall, you should play around with setting known values that look like a different protocol in the fields of the UDP packet, where Wireguard has reserved bytes, or bytes that you can map back from WG to the protocol you're trying to imitate, for example the packet type byte.
 
@@ -168,8 +177,8 @@ In its current state, it may be possible to temporarily hijack the data stream i
 The application has support for tunneling UDP packets over TCP. In order to do this, you will have to run the TCP listener on your gateway server first, and then connect from your local client:
 
 ```
-server$ ./tunnel -l 0.0.0.0:80 -r engage.cloudflareclient.com:2408 -m tu
-client$ ./tunnel -r server:80 -l 127.0.0.1:2408 -m ut
+server$ ./tunnel -l tcp:0.0.0.0:80 -r udp:engage.cloudflareclient.com:2408
+client$ ./tunnel -r tcp:server:80 -l udp:127.0.0.1:2408
 
 # edit wg0.conf to connect to 127.0.0.1:2408 instead of engage.cloudflareclient.com:2408
 client$ wg-quick up wg0
@@ -218,13 +227,19 @@ On Linux, you can turn off answering ICMP Echo Requests (only needed on the gate
 echo 1 > /proc/sys/net/ipv4/icmp_echo_ignore_all
 ```
 
+In case of ICMPv6, a different command needs to be issued, as it is treated as a different protocol that does not inherit ICMP's settings: (Note that the first `_` changes to `/`, that is not a typo.)
+
+```
+echo 1 > /proc/sys/net/ipv6/icmp/echo_ignore_all
+```
+
 ### Possible NAT issues
 
 By default, in order to make sure non-tunnel ICMP Echo Requests cannot hijack the data stream, there is a hardcoded identifier number and a sequential sequence number that is kept in sync between requests and replies.
 
 Unfortunately, some NATs are replacing the identifier and sequence numbers to completely random values in the ICMP Echo Request reaching the gateway server, but will be translated back to their original values once the gateway server sends the ICMP Echo Reply. This means that the client can filter by the magic number in the identifier, and keep track of the sequence, but the gateway server cannot.
 
-As a result, if you are behind such a NAT, you must turn on the "expect identifier and sequence randomization" (`-x` flag) feature on the gateway server (the one running with `-m iu`). This will ensure that the gateway server will not filter by magic identifier, and does not increment the sequence number -- as the NAT would not route a different sequence back to the same client.
+As a result, if you are behind such a NAT, you must turn on the "expect identifier and sequence randomization" (`-x` flag) feature on the gateway server (the one running with `-l icmp:`). This will ensure that the gateway server will not filter by magic identifier, and does not increment the sequence number -- as the NAT would not route a different sequence back to the same client.
 
 The downside of this is that the gateway server will receive all ICMP Echo Requests coming to the server, and may reply to them if the remote UDP server produces a result. (In case of Wireguard, packets that are not correctly formatted and encrypted will not receive any sort of reply, so this is mostly a non-issue.)
 
@@ -293,6 +308,6 @@ There is no full IPv6 support in the application at this time, only the ICMPv6 t
 
 ## Future work
 
-* Rewrite application to have separate "local server" and "remote client" components, that way the modes of operation are not fused together in one component (e.g. ui6 for UDP-to-ICMPv6) but instead selectable separately (e.g. `-l udp:... -r icmpv6:...`).
 * Finish full IPv6 support.
-* Add support for obfuscation methods which can resize the payload, that way encryption headers can be added and there is more flexibility if protocols need to be concealed to look like other protocols.
+* ~~Rewrite application to have separate "local server" and "remote client" components, that way the modes of operation are not fused together in one component (e.g. `-m ui6` for UDP-to-ICMPv6) but instead selectable separately (e.g. `-l udp:... -r icmpv6:...`).~~ Done.
+* ~~Add support for obfuscation methods which can resize the payload, that way encryption headers can be added and there is more flexibility if protocols need to be concealed to look like other protocols.~~ Done.

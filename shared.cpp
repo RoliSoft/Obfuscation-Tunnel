@@ -302,10 +302,10 @@ int resolve_host6(const char *addr, struct sockaddr_in6 *sockaddr)
 
 void print_help(char* argv[])
 {
-    printf("usage: %s -r addr:port [args]\narguments:\n\n", argv[0]);
+    printf("usage: %s -l proto:addr:port -r proto:addr:port [args]\narguments:\n\n", argv[0]);
     printf("   -l endpoint\tLocal listening protocol, address and port.\n   \t\t  Example: tcp:127.0.0.1:80 / icmp6:[::1]\n   \t\t  Supported protocols: udp, tcp, icmp, imcp6.\n");
     printf("   -r endpoint\tRemote host to tunnel packets to.\n");
-    printf("   -o [mode]\tEnable packet obfuscation. Possible values:\n   \t\t  s - Simple generic header obfuscation (Default)\n   \t\t  x - XOR packet with key specified in -k\n");
+    printf("   -o [mode]\tEnable packet obfuscation. Possible values:\n   \t\t  s - Simple generic header obfuscation (Default)\n   \t\t  x - XOR packet obfuscation with rolling key\n");
     printf("   -k key\tSpecifies a key for the obfuscator module.\n");
     printf("   -s\t\tDisable multithreading, multiplex sockets instead.\n");
     printf("   -v\t\tDetailed logging at the expense of decreased throughput.\n");
