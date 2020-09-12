@@ -16,8 +16,8 @@ private:
 #endif
 
 public:
-    icmp_server(struct session* session)
-        : transport_base(session->verbose), icmp_base(session->random_id), pcap(session->pcap), cap_dev(session->cap_dev), local_addr(session->local_addr)
+    icmp_server(struct sockaddr_in local_addr, struct session* session)
+        : transport_base(session->verbose), icmp_base(session->random_id), pcap(session->pcap), cap_dev(session->cap_dev), local_addr(local_addr)
     {
     }
 

@@ -9,8 +9,8 @@ private:
     struct sockaddr_in local_addr, client_addr;
 
 public:
-    udp_server(struct session* session)
-        : transport_base(session->verbose), local_addr(session->local_addr)
+    udp_server(struct sockaddr_in local_addr, struct session* session)
+        : transport_base(session->verbose), local_addr(local_addr)
     {
     }
 

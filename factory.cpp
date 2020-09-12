@@ -9,54 +9,36 @@
 #include "icmp6_client.cpp"
 #include "icmp6_server.cpp"
 
-transport_base* create_server_transport(struct session *session)
+transport_base* create_transport(int protocol, struct sockaddr_in *address, bool server, struct session *session)
 {
-    switch (session->local_proto)
+    switch (protocol)
     {
         case PROTO_UDP:
-            return new udp_server(session);
+            if (server) return new udp_server(*address, session);
+            else        return new udp_client(*address, session);
         
         case PROTO_TCP:
-            return new tcp_server(session);
+            if (server) return new tcp_server(*address, session);
+            else        return new tcp_client(*address, session);
 
         case PROTO_ICMP:
-            return new icmp_server(session);
+            if (server) return new icmp_server(*address, session);
+            else        return new icmp_client(*address, session);
 
         case PROTO_ICMP6:
-            return new icmp6_server(session);
+            if (server) return new icmp6_server(*(struct sockaddr_in6*)address, session);
+            else        return new icmp6_client(*(struct sockaddr_in6*)address, session);
         
         default:
-            fprintf(stderr, "Local protocol %d is not supported.\n", session->local_proto);
-            return nullptr;
-    }
-}
-
-transport_base* create_client_transport(struct session *session)
-{
-    switch (session->remote_proto)
-    {
-        case PROTO_UDP:
-            return new udp_client(session);
-        
-        case PROTO_TCP:
-            return new tcp_client(session);
-
-        case PROTO_ICMP:
-            return new icmp_client(session);
-
-        case PROTO_ICMP6:
-            return new icmp6_client(session);
-        
-        default:
-            fprintf(stderr, "Remote protocol %d is not supported.\n", session->remote_proto);
+            fprintf(stderr, "Protocol %d is not supported.\n", protocol);
             return nullptr;
     }
 }
 
 int run_session(struct session *session)
 {
-    transport_base *local = create_server_transport(session);
-    transport_base *remote = create_client_transport(session);
+    transport_base *local = create_transport(session->local_proto, &session->local_addr, true, session);
+    transport_base *remote = create_transport(session->remote_proto, &session->remote_addr, false, session);
 
     if (local == nullptr || remote == nullptr)
     {
