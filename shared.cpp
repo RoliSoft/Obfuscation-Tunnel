@@ -549,9 +549,57 @@ int parse_endpoint_arg(char* argument, int *proto_dest, struct sockaddr_in *addr
     
     token = strtok(NULL, ":");
 
-    if (proto == PROTO_ICMP6)
+    bool is_v6 = false;
+    char addr6str[INET6_ADDRSTRLEN];
+    if (token[0] == '[')
     {
-        if (resolve_host6(token, (struct sockaddr_in6*)addr_dest) != 0)
+        // parse ipv6 between [] with strtok on :
+
+        for (char *src = &token[1], *dst = (char*)&addr6str;;)
+        {
+            if (*src == ']')
+            {
+                *dst = 0;
+                is_v6 = true;
+                break;
+            }
+            else if (*src == 0)
+            {
+                token = strtok(NULL, ":");
+                if (token == NULL) break;
+
+                if (token[-2] == 0)
+                {
+                    // detect two colons
+                    *dst++ = ':';
+                }
+
+                if (token[0] == ']')
+                {
+                    // detect end without number
+                    *dst++ = ':';
+                    *dst = 0;
+                    is_v6 = true;
+                    break;
+                }
+
+                src = token;
+                *dst++ = ':';
+            }
+
+            *dst++ = *src++;
+        }
+
+        if (!is_v6)
+        {
+            fprintf(stderr, "Could not parse IPv6 address.\n");
+            return EXIT_FAILURE;
+        }
+    }
+
+    if (proto == PROTO_ICMP6 || is_v6)
+    {
+        if (resolve_host6(is_v6 ? addr6str : token, (struct sockaddr_in6*)addr_dest) != 0)
         {
             return EXIT_FAILURE;
         }
@@ -568,7 +616,7 @@ int parse_endpoint_arg(char* argument, int *proto_dest, struct sockaddr_in *addr
     int port = token != NULL
         ? strtoul(token, NULL, 0)
         : 0;
-    
+
     if (port != 0)
     {
         addr_dest->sin_port = htons(port);
