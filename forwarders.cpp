@@ -3,7 +3,9 @@
 #include "transport_base.cpp"
 #include "obfuscate_base.cpp"
 
-int loop_transports_select(transport_base *local, transport_base *remote, obfuscate_base *obfuscator)
+#include "dns_mocker.cpp"
+
+int loop_transports_select(transport_base *local, transport_base *remote, obfuscate_base *obfuscator, mocker_base *mocker)
 {
     struct pollfd fds[2];
     memset(fds, 0 , sizeof(fds));
@@ -38,44 +40,75 @@ int loop_transports_select(transport_base *local, transport_base *remote, obfusc
         {
             msglen = local->receive(buffer + MTU_SIZE, &offset);
 
-            if (msglen > 0)
+            if (msglen == 0)
             {
-                if (obfuscator != nullptr)
-                {
-                    msglen = obfuscator->encipher(buffer + MTU_SIZE + offset, msglen);
-                }
-
-                if (msglen > 0)
-                {
-                    remote->send(buffer + MTU_SIZE + offset, msglen);
-                }
+                goto next_fd;
             }
             else if (msglen < 0)
             {
                 local->restart();
+                goto next_fd;
             }
+
+            if (obfuscator != nullptr)
+            {
+                msglen = obfuscator->encipher(buffer + MTU_SIZE + offset, msglen);
+
+                if (msglen < 1)
+                {
+                    goto next_fd;
+                }
+            }
+
+            if (mocker != nullptr)
+            {
+                msglen = mocker->encapsulate(buffer + MTU_SIZE, msglen, &offset);
+
+                if (msglen < 1)
+                {
+                    goto next_fd;
+                }
+            }
+
+            remote->send(buffer + MTU_SIZE + offset, msglen);
         }
 
+    next_fd:
         if (fds[1].revents == POLLIN)
         {
             msglen = remote->receive(buffer + MTU_SIZE, &offset);
 
-            if (msglen > 0)
+            if (msglen == 0)
             {
-                if (obfuscator != nullptr)
-                {
-                    msglen = obfuscator->decipher(buffer + MTU_SIZE + offset, msglen);
-                }
-
-                if (msglen > 0)
-                {
-                    local->send(buffer + MTU_SIZE + offset, msglen);
-                }
+                continue;
             }
             else if (msglen < 0)
             {
                 remote->restart();
+                continue;
             }
+
+            if (mocker != nullptr)
+            {
+                msglen = mocker->decapsulate(buffer + MTU_SIZE, msglen, &offset);
+
+                if (msglen < 1)
+                {
+                    continue;
+                }
+            }
+
+            if (obfuscator != nullptr)
+            {
+                msglen = obfuscator->decipher(buffer + MTU_SIZE + offset, msglen);
+
+                if (msglen < 1)
+                {
+                    continue;
+                }
+            }
+
+            local->send(buffer + MTU_SIZE + offset, msglen);
         }
     }
 
@@ -85,7 +118,7 @@ int loop_transports_select(transport_base *local, transport_base *remote, obfusc
     return run ? EXIT_FAILURE : EXIT_SUCCESS;
 }
 
-int loop_transports_thread(transport_base *local, transport_base *remote, obfuscate_base *obfuscator)
+int loop_transports_thread(transport_base *local, transport_base *remote, obfuscate_base *obfuscator, mocker_base *mocker)
 {
     std::thread threads[2];
 
@@ -104,7 +137,7 @@ int loop_transports_thread(transport_base *local, transport_base *remote, obfusc
         }
     }
 
-    threads[0] = std::thread([](transport_base *local, transport_base *remote, obfuscate_base *obfuscator)
+    threads[0] = std::thread([](transport_base *local, transport_base *remote, obfuscate_base *obfuscator, mocker_base *mocker)
     {
         int msglen, offset;
         char buffer[MTU_SIZE * 3];
@@ -132,11 +165,21 @@ int loop_transports_thread(transport_base *local, transport_base *remote, obfusc
                 }
             }
 
+            if (mocker != nullptr)
+            {
+                msglen = mocker->encapsulate(buffer + MTU_SIZE, msglen, &offset);
+
+                if (msglen < 1)
+                {
+                    continue;
+                }
+            }
+
             remote->send(buffer + MTU_SIZE + offset, msglen);
         }
-    }, std::cref(local), std::cref(remote), std::cref(obfuscator));
+    }, std::cref(local), std::cref(remote), std::cref(obfuscator), std::cref(mocker));
 
-    threads[1] = std::thread([](transport_base *local, transport_base *remote, obfuscate_base *obfuscator)
+    threads[1] = std::thread([](transport_base *local, transport_base *remote, obfuscate_base *obfuscator, mocker_base *mocker)
     {
         int msglen, offset;
         char buffer[MTU_SIZE * 3];
@@ -154,6 +197,16 @@ int loop_transports_thread(transport_base *local, transport_base *remote, obfusc
                 continue;
             }
 
+            if (mocker != nullptr)
+            {
+                msglen = mocker->decapsulate(buffer + MTU_SIZE, msglen, &offset);
+
+                if (msglen < 1)
+                {
+                    continue;
+                }
+            }
+
             if (obfuscator != nullptr)
             {
                 msglen = obfuscator->decipher(buffer + MTU_SIZE + offset, msglen);
@@ -166,7 +219,7 @@ int loop_transports_thread(transport_base *local, transport_base *remote, obfusc
 
             local->send(buffer + MTU_SIZE + offset, msglen);
         }
-    }, std::cref(local), std::cref(remote), std::cref(obfuscator));
+    }, std::cref(local), std::cref(remote), std::cref(obfuscator), std::cref(mocker));
 
     for (int i = 0; i < 2; i++)
     {

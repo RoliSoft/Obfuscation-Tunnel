@@ -11,6 +11,7 @@
 #include "icmp6_server.cpp"
 #include "simple_obfuscator.cpp"
 #include "xor_obfuscator.cpp"
+#include "dns_mocker.cpp"
 
 transport_base* create_transport(int protocol, struct sockaddr_in *address, bool server, struct session *session)
 {
@@ -53,6 +54,23 @@ obfuscate_base* create_obfuscator(struct session *session)
     }
 }
 
+mocker_base* create_mocker(struct session *session)
+{
+    if (session->mocker == nullptr)
+    {
+        return nullptr;
+    }
+    else if (strcmp(session->mocker, "dns_client") == 0 || strcmp(session->mocker, "dns_server") == 0)
+    {
+        return new dns_mocker(session);
+    }
+    else
+    {
+        fprintf(stderr, "'%s' is not a supported mocker.\n", session->mocker);
+        return nullptr;
+    }
+}
+
 int run_session(struct session *session)
 {
     transport_base *local = create_transport(session->local_proto, &session->local_addr, true, session);
@@ -64,16 +82,17 @@ int run_session(struct session *session)
     }
 
     obfuscate_base *obfuscator = create_obfuscator(session);
+    mocker_base *mocker = create_mocker(session);
 
     int res;
 
     if (session->no_threading)
     {
-        res = loop_transports_select(local, remote, obfuscator);
+        res = loop_transports_select(local, remote, obfuscator, mocker);
     }
     else
     {
-        res = loop_transports_thread(local, remote, obfuscator);
+        res = loop_transports_thread(local, remote, obfuscator, mocker);
     }
 
     //free(local);

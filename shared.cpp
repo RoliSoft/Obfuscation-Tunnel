@@ -4,6 +4,7 @@
 #include <stdlib.h>
 #include <unistd.h>
 #include <string.h>
+#include <limits.h>
 #include <netdb.h>
 #include <sys/poll.h>
 #include <sys/types.h>
@@ -72,6 +73,7 @@ struct session
     char obfuscate;
     char *key;
     int key_length;
+    char *mocker;
 #if HAVE_PCAP
     bool pcap;
     char *cap_dev;
@@ -307,6 +309,7 @@ void print_help(char* argv[])
     printf("   -r endpoint\tRemote host to tunnel packets to.\n");
     printf("   -o [mode]\tEnable packet obfuscation. Possible values:\n   \t\t  s - Simple generic header obfuscation (Default)\n   \t\t  x - XOR packet obfuscation with rolling key\n");
     printf("   -k key\tSpecifies a key for the obfuscator module.\n");
+    printf("   -m mode\tEnable protocol imitator. Possible values:\n   \t\t  dns_client - Send data as A queries to remote\n   \t\t  dns_server - Reply to A queries on local\n");
     printf("   -s\t\tDisable multithreading, multiplex sockets instead.\n");
     printf("   -v\t\tDetailed logging at the expense of decreased throughput.\n");
     printf("   -h\t\tDisplays this message.\n");
@@ -452,7 +455,7 @@ int parse_arguments(int argc, char* argv[], struct session *s)
     memset(s, 0, sizeof(*s));
 
     int opt;
-    while((opt = getopt(argc, argv, ":hl:r:o:p:sk:vnx")) != -1)
+    while((opt = getopt(argc, argv, ":hl:r:o:p:sk:m:vnx")) != -1)
     {
         if (opt == ':' && optopt != opt)
         {
@@ -515,6 +518,10 @@ int parse_arguments(int argc, char* argv[], struct session *s)
             case 'k':
                 s->key = optarg;
                 s->key_length = strlen(optarg);
+                break;
+
+            case 'm':
+                s->mocker = optarg;
                 break;
         }
     }
