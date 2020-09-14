@@ -22,6 +22,8 @@ arguments:
    -m mode      Enable protocol imitator. Possible values:
                   dns_client - Send data as A queries to remote
                   dns_server - Reply to A queries on local
+                  http_ws_client - Masquarade as HTTP WebSocket stream
+                  http_ws_server - Accept data in HTTP WebSocket streams
    -s           Disable multithreading, multiplex sockets instead.
    -v           Detailed logging at the expense of decreased throughput.
    -h           Displays this message.
@@ -39,7 +41,6 @@ ICMP/ICMPv6-specific arguments:
                   Optional value, defaults to default gateway otherwise.
    -x           Expect identifier and sequence randomization.
                   Not recommended, see documentation for pros and cons.
-
 ```
 
 Example for UDP-to-UDP tunnel:
@@ -224,6 +225,35 @@ localhost   test_server     DNS          62         Standard query 0x1337 A test
 ```
 
 The gateway server will then extract the data from the DNS packet before forwarding it to the remote server.
+
+### HTTP WebSocket imitator
+
+The HTTP WebSocket imitator can be turned on using the `-m http_ws_client` flag on the local server, and with `-m http_ws_server` on the gateway server. It can work only on top of TCP transports.
+
+When the `http_ws_server` module is run, the local TCP endpoint will first require a valid handshake before the data is forwarded. If the client sends a valid HTTP request to upgrade to a websocket connection, the endpoint will reply with `101 Switching Protocols`, and any further packets will be forwarded to the remote endpoint on the gateway server. If the client fails to send a request which the application can interpret, it will reply with `404 Not Found` and close the connection.
+
+Just like in the case of the DNS imitator, there is no real HTTP server implementation behind the scenes, but for the sake of completion, it will behave as real server and send HTTP error codes if a client other than this application tries to connect to it.
+
+By default, the HTTP request being mimicked will try to connect to `docs.microsoft.com` and upgrade the `/updates` endpoint to a websocket connection. If you would like to hide the tunnel behind a real webserver, you may configure a real webserver to proxy to the application.
+
+Example configuration for nginx to match the defaults:
+
+```
+server {
+    listen       80;
+    server_name  docs.microsoft.com;
+
+    location /updates {
+        proxy_pass      http://127.0.0.1:8080;
+    }
+}
+```
+
+You can run this `server` instance alongside your other websites without any interference with them. To run a compatible tunnel on the same server where nginx is running, run:
+
+```
+server$ ./tunnel -l tcp:127.0.0.1:8080 -r udp:engage.cloudflareclient.com:2408 -m http_ws_server
+```
 
 ## UDP tunneling
 
