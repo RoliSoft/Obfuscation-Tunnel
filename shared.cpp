@@ -70,7 +70,7 @@ struct session
     bool omit_length;
     bool random_id;
     bool no_threading;
-    char obfuscate;
+    char *obfuscator;
     char *key;
     int key_length;
     char *mocker;
@@ -307,7 +307,7 @@ void print_help(char* argv[])
     printf("usage: %s -l proto:addr:port -r proto:addr:port [args]\narguments:\n\n", argv[0]);
     printf("   -l endpoint\tLocal listening protocol, address and port.\n   \t\t  Example: tcp:127.0.0.1:80 / icmp6:[::1]\n   \t\t  Supported protocols: udp, tcp, icmp, imcp6.\n");
     printf("   -r endpoint\tRemote host to tunnel packets to.\n");
-    printf("   -o [mode]\tEnable packet obfuscation. Possible values:\n   \t\t  s - Simple generic header obfuscation (Default)\n   \t\t  x - XOR packet obfuscation with rolling key\n");
+    printf("   -o [mode]\tEnable packet obfuscation. Possible values:\n   \t\t  header - Simple generic header obfuscation (Default)\n   \t\t  xor - XOR packet obfuscation with rolling key\n");
     printf("   -k key\tSpecifies a key for the obfuscator module.\n");
     printf("   -m mode\tEnable protocol imitator. Possible values:\n   \t\t  dns_client - Send data as A queries to remote\n   \t\t  dns_server - Reply to A queries on local\n");
     printf("   -s\t\tDisable multithreading, multiplex sockets instead.\n");
@@ -477,11 +477,11 @@ int parse_arguments(int argc, char* argv[], struct session *s)
                 break;
             
             case 'o':
-                s->obfuscate = 's';
+                s->obfuscator = (char*)"header";
 
                 if_optional_arg()
                 {
-                    s->obfuscate = optarg[0];
+                    s->obfuscator = optarg;
                 }
                 break;
             

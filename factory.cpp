@@ -41,16 +41,22 @@ transport_base* create_transport(int protocol, struct sockaddr_in *address, bool
 
 obfuscate_base* create_obfuscator(struct session *session)
 {
-    switch (session->obfuscate)
+    if (session->obfuscator == nullptr)
     {
-        case 's':
-            return new simple_obfuscator(session);
-
-        case 'x':
-            return new xor_obfuscator(session);
-
-        default:
-            return nullptr;
+        return nullptr;
+    }
+    else if (strcmp(session->obfuscator, "header") == 0)
+    {
+        return new simple_obfuscator(session);
+    }
+    else if (strcmp(session->obfuscator, "xor") == 0)
+    {
+        return new xor_obfuscator(session);
+    }
+    else
+    {
+        fprintf(stderr, "'%s' is not a supported obfuscator.\n", session->obfuscator);
+        return nullptr;
     }
 }
 
