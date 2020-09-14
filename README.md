@@ -16,16 +16,22 @@ arguments:
                   Supported protocols: udp, tcp, icmp, imcp6.
    -r endpoint  Remote host to tunnel packets to.
    -o [mode]    Enable packet obfuscation. Possible values:
-                  s - Simple generic header obfuscation (Default)
-                  x - XOR packet obfuscation with rolling key
+                  header - Simple generic header obfuscation (Default)
+                  xor - XOR packet obfuscation with rolling key
    -k key       Specifies a key for the obfuscator module.
+   -m mode      Enable protocol imitator. Possible values:
+                  dns_client - Send data as A queries to remote
+                  dns_server - Reply to A queries on local
    -s           Disable multithreading, multiplex sockets instead.
    -v           Detailed logging at the expense of decreased throughput.
    -h           Displays this message.
 
 TCP-specific arguments:
 
-   -n           Do not send and expect 7-bit encoded length header.
+   -e           Type of encoding to use for the length header:
+                  v - 7-bit encoded variable-length header (Default)
+                  s - 2-byte unsigned short
+                  n - None (Not recommended)
 
 ICMP/ICMPv6-specific arguments:
 
@@ -33,6 +39,7 @@ ICMP/ICMPv6-specific arguments:
                   Optional value, defaults to default gateway otherwise.
    -x           Expect identifier and sequence randomization.
                   Not recommended, see documentation for pros and cons.
+
 ```
 
 Example for UDP-to-UDP tunnel:
@@ -151,7 +158,7 @@ Specifying a value for the `-o` flag allows selecting a different module, and th
 
 ### Simple generic header obfuscation
 
-This is the default module, but also selectable with `-o s` explicitly. As it was specifically designed to disguise Wireguard headers, the algorithm used proceeds as follows:
+This is the default module, but also selectable with `-o header` explicitly. As it was specifically designed to disguise Wireguard headers, the algorithm used proceeds as follows:
 
 * XORs the first 16 bytes of the UDP packet with a built-in key _or_ a one-byte key provided through `-k`.
 * As the first 16 bytes of a Wireguard header contain 3 reserved always-zero bytes, and two more 32-bit counters (sender, receiver index) whose most significant bytes are mostly zero (especially at the beginning of the connection), in order to avoid fingerprinting by looking at the known gaps being XOR'd to the same value from the key, if the packet is long enough (>32 bytes), the next 16 bytes will be XOR'd into the first 16 bytes. In Wireguard, the next 16 bytes are already encrypted data, which means the packet's header will be not have static bytes where zero would be otherwise.
@@ -160,9 +167,63 @@ As Wireguard already does a great job of encrypting the traffic, the whole packe
 
 ### XOR obfuscation
 
-This module is selectable with `-o x` and simply XORs the whole data stream with the built-in key or the one specified with `-k`. The size of the key can be any number of bytes up to 1,500. If the packet is larger than the key, the key will be repeated.
+This module is selectable with `-o xor` and simply XORs the whole data stream with the built-in key or the one specified with `-k`. The size of the key can be any number of bytes up to 1,500. If the packet is larger than the key, the key will be repeated.
 
 If you would like to identify the packets as something else in the firewall, you should play around with setting known values that look like a different protocol in the fields of the UDP packet, where Wireguard has reserved bytes, or bytes that you can map back from WG to the protocol you're trying to imitate, for example the packet type byte.
+
+## Protocol imitation
+
+While the application was originally developed to work in the network (e.g. ICMP) and transport (e.g. TCP, UDP) layers, support has been for imitating application (e.g. DNS, HTTP) layer protocols that run under their supported transport layers.
+
+Protocol imitators (called "mockers" in the application) work on top of the transport layers, and may initiate a handshake that looks like the protocol they are trying to imitate, and then encapsulate the datastream in a way that it would look like it is legit traffic from the protocol they are trying to imitate.
+
+When used together with an obfuscator, the obfuscator will process the data before the encapsulation by the mocker, otherwise, the protocol being imitated would be obfuscated as well.
+
+### DNS imitator
+
+The DNS imitator can be turned on using the `-m dns_client` flag on the local server, and with `-m dns_server` on the gateway server. It can work on top of the UDP and TCP transports, as DNS supports both. (Note that it can be run with ICMP endpoints as well, but a warning will be produced by the application, as it does not make much sense to encapsulate ICMP Echo Requests into DNS queries.)
+
+The module will send DNS A queries to the remote server, which will reply with DNS A responses, where the "hostname" field will contain your data. The module does not try to emulate a complete DNS server, only produce DNS-like traffic, as such it will not be able to properly respond to DNS requests that are not from this application.
+
+The DNS packets will look completely valid as long as the data sent is up to 255 bytes in length and plain-text. While the module will send binary bytes beyond 255 in length, these packets may be identified as corrupted by the firewall or other packet sniffers.
+
+Example usage:
+
+```
+client$ ./tunnel -l udp:127.0.0.1:8080 -r udp:server:53 -m dns_client
+server$ ./tunnel -l udp:0.0.0.0:53 -r udp:engage.cloudflareclient.com:2408 -m dns_server
+```
+
+Sending a packet with the bytes `test message` to the local endpoint will be delivered to the gateway server as such:
+
+```
+Source -    Destination -   Protocol -   Length -   Info -
+localhost   test_server     DNS          62         Standard query 0x1337 A test message
+
+[+] User Datagram Protocol, Src Port: 63542 (63542), Dst Port: domain (53)
+[-] Domain Name System (query)
+      Transaction ID: 0x1337
+  [-] Flags: 0x0100 Standard query
+        0... .... .... .... = Response: Message is a query
+        .000 0... .... .... = Opcode: Standard query (0)
+        .... ..0. .... .... = Truncated: Message is not truncated
+        .... ...1 .... .... = Recursion desired: Do query recursively
+        .... .... .0.. .... = Z: reserved (0)
+        .... .... ...0 .... = Non-authenticated data: Unacceptable
+      Questions: 1
+      Answer RRs: 0
+      Authority RRs: 0
+      Additional RRs: 0 
+  [-] Queries
+    [-] test message: type A, class IN
+          Name: test message
+          Name Length: 12
+          Label Count: 1
+          Type: A (Host Address) (1)
+          Class: IN (0x0001)
+```
+
+The gateway server will then extract the data from the DNS packet before forwarding it to the remote server.
 
 ## UDP tunneling
 
@@ -184,13 +245,15 @@ client$ ./tunnel -r tcp:server:80 -l udp:127.0.0.1:2408
 client$ wg-quick up wg0
 ```
 
-TCP packets start with a length-value, a 16-bit unsigned field that is of variable length, due to an encoding scheme which uses the most significant bit in the byte to determine if more bytes are needed to be read in order to decode the full length of the payload. Using this method, there will be no fingerprintable zero bytes which are always present in the packet.
+By default, or when set explicitly with the `-e v` flag, TCP packets start with a length-value, a 16-bit unsigned field that is of variable length, due to an encoding scheme which uses the most significant bit in the byte to determine if more bytes are needed to be read in order to decode the full length of the payload. Using this method, there will be no fingerprintable zero bytes which are always present in the packet.
 
 In its current form, the variable encoding will place 1 byte in the payload for lengths up to 127 bytes, 2 bytes to represent lengths up to 16,383, and caps out at 3-bytes for values of up to 32,767. As the MTU for an UDP packet over the internet generally does not exceed 1,500 bytes, capping out at 32k should not be a problem by far. (However, the cap can be easily extended by modifying the source code, as the underlying encoding scheme supports any sizes.)
 
+If the variable-length encoding does not fit your purpose, for example, you're trying to connect to a service directly or imitate a protocol, you can set a more standard 16-bit unsigned short header in network byte order, using the `-e s` flag.
+
 ### Headerless forwarding
 
-It is possible to turn off the 7-bit encoded length prepended to TCP packets using the `-n` flag. This allows for native forwarding from UDP to TCP or TCP to UDP without needing a second intermediary tunnel from the application to strip off the length header.
+It is possible to turn off the length header prepended to TCP packets using the `-e n` flag. This allows for native forwarding from UDP to TCP or TCP to UDP without needing a second intermediary tunnel from the application to strip off the length header.
 
 For UDP-based protocols, using UDP to TCP to UDP, however, turning off the length header will result in the UDP packets not being correctly reassembled on the gateway due to fragmentation occuring at the TCP stage, that the gateway server will not be aware of.
 
