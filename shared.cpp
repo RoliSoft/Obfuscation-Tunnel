@@ -36,6 +36,9 @@
 #define PROTO_TCP 1
 #define PROTO_ICMP 2
 #define PROTO_ICMP6 3
+#define LENGTH_VAR 0
+#define LENGTH_16BIT 1
+#define LENGTH_NONE 2
 #define MTU_SIZE 1500
 
 #define IP_SIZE sizeof(struct sockaddr_in)
@@ -67,7 +70,7 @@ struct session
 {
     // boolean flags
     bool verbose;
-    bool omit_length;
+    int length_type;
     bool random_id;
     bool no_threading;
     char *obfuscator;
@@ -314,7 +317,7 @@ void print_help(char* argv[])
     printf("   -v\t\tDetailed logging at the expense of decreased throughput.\n");
     printf("   -h\t\tDisplays this message.\n");
     printf("\nTCP-specific arguments:\n\n");
-    printf("   -n\t\tDo not send and expect 7-bit encoded length header.\n");
+    printf("   -e\t\tType of encoding to use for the length header. Possible values:\n   \t\t  v - 7-bit encoded variable-length header (Default)\n   \t\t  s - 2-byte unsigned short\n   \t\t  n - None (Not recommended)\n");
     printf("\nICMP/ICMPv6-specific arguments:\n\n");
 #if HAVE_PCAP
     printf("   -p [if]\tUse PCAP for inbound, highly recommended.\n   \t\t  Optional value, defaults to default gateway otherwise.\n");
@@ -455,7 +458,7 @@ int parse_arguments(int argc, char* argv[], struct session *s)
     memset(s, 0, sizeof(*s));
 
     int opt;
-    while((opt = getopt(argc, argv, ":hl:r:o:p:sk:m:vnx")) != -1)
+    while((opt = getopt(argc, argv, ":hl:r:o:p:sk:m:ve:x")) != -1)
     {
         if (opt == ':' && optopt != opt)
         {
@@ -489,8 +492,25 @@ int parse_arguments(int argc, char* argv[], struct session *s)
                 s->random_id = true;
                 break;
             
-            case 'n':
-                s->omit_length = true;
+            case 'e':
+                switch (optarg[0])
+                {
+                    case 'v':
+                        s->length_type = LENGTH_VAR;
+                        break;
+
+                    case 's':
+                        s->length_type = LENGTH_16BIT;
+                        break;
+
+                    case 'n':
+                        s->length_type = LENGTH_NONE;
+                        break;
+
+                    default:
+                        fprintf(stderr, "'%s' is not a supported length encoding.\n", optarg);
+                        return EXIT_FAILURE;
+                }
                 break;
             
             case 'p':
