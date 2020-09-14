@@ -50,6 +50,16 @@ int loop_transports_select(transport_base *local, transport_base *remote, obfusc
                 goto next_fd;
             }
 
+            if (mocker != nullptr && mocker->server)
+            {
+                msglen = mocker->decapsulate(buffer + MTU_SIZE, msglen, &offset);
+
+                if (msglen < 1)
+                {
+                    goto next_fd;
+                }
+            }
+
             if (obfuscator != nullptr)
             {
                 msglen = obfuscator->encipher(buffer + MTU_SIZE + offset, msglen);
@@ -60,7 +70,7 @@ int loop_transports_select(transport_base *local, transport_base *remote, obfusc
                 }
             }
 
-            if (mocker != nullptr)
+            if (mocker != nullptr && !mocker->server)
             {
                 msglen = mocker->encapsulate(buffer + MTU_SIZE, msglen, &offset);
 
@@ -88,7 +98,7 @@ int loop_transports_select(transport_base *local, transport_base *remote, obfusc
                 continue;
             }
 
-            if (mocker != nullptr)
+            if (mocker != nullptr && !mocker->server)
             {
                 msglen = mocker->decapsulate(buffer + MTU_SIZE, msglen, &offset);
 
@@ -101,6 +111,16 @@ int loop_transports_select(transport_base *local, transport_base *remote, obfusc
             if (obfuscator != nullptr)
             {
                 msglen = obfuscator->decipher(buffer + MTU_SIZE + offset, msglen);
+
+                if (msglen < 1)
+                {
+                    continue;
+                }
+            }
+
+            if (mocker != nullptr && mocker->server)
+            {
+                msglen = mocker->encapsulate(buffer + MTU_SIZE, msglen, &offset);
 
                 if (msglen < 1)
                 {
@@ -155,6 +175,16 @@ int loop_transports_thread(transport_base *local, transport_base *remote, obfusc
                 continue;
             }
 
+            if (mocker != nullptr && mocker->server)
+            {
+                msglen = mocker->decapsulate(buffer + MTU_SIZE, msglen, &offset);
+
+                if (msglen < 1)
+                {
+                    continue;
+                }
+            }
+
             if (obfuscator != nullptr)
             {
                 msglen = obfuscator->encipher(buffer + MTU_SIZE + offset, msglen);
@@ -165,7 +195,7 @@ int loop_transports_thread(transport_base *local, transport_base *remote, obfusc
                 }
             }
 
-            if (mocker != nullptr)
+            if (mocker != nullptr && !mocker->server)
             {
                 msglen = mocker->encapsulate(buffer + MTU_SIZE, msglen, &offset);
 
@@ -197,7 +227,7 @@ int loop_transports_thread(transport_base *local, transport_base *remote, obfusc
                 continue;
             }
 
-            if (mocker != nullptr)
+            if (mocker != nullptr && !mocker->server)
             {
                 msglen = mocker->decapsulate(buffer + MTU_SIZE, msglen, &offset);
 
@@ -210,6 +240,16 @@ int loop_transports_thread(transport_base *local, transport_base *remote, obfusc
             if (obfuscator != nullptr)
             {
                 msglen = obfuscator->decipher(buffer + MTU_SIZE + offset, msglen);
+
+                if (msglen < 1)
+                {
+                    continue;
+                }
+            }
+
+            if (mocker != nullptr && mocker->server)
+            {
+                msglen = mocker->encapsulate(buffer + MTU_SIZE, msglen, &offset);
 
                 if (msglen < 1)
                 {

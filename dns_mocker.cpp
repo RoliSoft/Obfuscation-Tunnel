@@ -30,10 +30,8 @@ private:
     struct dns_packet_footer footer;
 
 public:
-    bool server;
-
     dns_mocker(bool server)
-        : server(server)
+        : mocker_base(server)
     {
         memset(&this->header, 0, sizeof(this->header));
         this->header.transaction_id = htons(0x1337);
@@ -54,27 +52,12 @@ public:
 
     virtual int encapsulate(char* message, int length, int* offset)
     {
-        if (!this->server)
-        {
-            this->header.length = (unsigned char)min(length, UCHAR_MAX);
-            return _encapsulate(message, length, offset, (char*)&this->header, sizeof(this->header), (char*)&this->footer, sizeof(this->footer));
-        }
-        else
-        {
-            return _decapsulate(message, length, offset, sizeof(this->header), sizeof(this->footer));
-        }
+        this->header.length = (unsigned char)min(length, UCHAR_MAX);
+        return _encapsulate(message, length, offset, (char*)&this->header, sizeof(this->header), (char*)&this->footer, sizeof(this->footer));
     }
 
     virtual int decapsulate(char* message, int length, int* offset)
     {
-        if (!this->server)
-        {
-            return _decapsulate(message, length, offset, sizeof(this->header), sizeof(this->footer));
-        }
-        else
-        {
-            this->header.length = (unsigned char)min(length, UCHAR_MAX);
-            return _encapsulate(message, length, offset, (char*)&this->header, sizeof(this->header), (char*)&this->footer, sizeof(this->footer));
-        }
+        return _decapsulate(message, length, offset, sizeof(this->header), sizeof(this->footer));
     }
 };

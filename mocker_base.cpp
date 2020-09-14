@@ -7,6 +7,8 @@
 class mocker_base
 {
 public:
+    bool server;
+
     virtual int setup(transport_base *local, transport_base *remote)
     {
         (void)local;
@@ -29,6 +31,11 @@ public:
     }
 
 protected:
+    mocker_base(bool server)
+        : server(server)
+    {
+    }
+
     static inline int _encapsulate(char* message, int length, int* offset, char* header, int header_len, char* footer, int footer_len)
     {
         if (footer_len != 0)
