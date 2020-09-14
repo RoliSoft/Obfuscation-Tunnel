@@ -11,6 +11,7 @@ protected:
     char *http_response = (char*)"HTTP/1.1 101 Switching Protocols\r\nServer: Microsoft-IIS/10.0\r\nConnection: Upgrade\r\nUpgrade: websocket\r\nSec-WebSocket-Accept: MXvVhX119hHqUOkRYz4Tp0L4T4c=\r\n\r\n";
     char *http_request_check = (char*)"GET /updates HTTP/1.1\r";
     char *http_response_check = (char*)"HTTP/1.1 101 Switching Protocols\r";
+    char *http_response_404 = (char*)"HTTP/1.1 404 Not Found\r\nServer: Microsoft-IIS/10.0\r\n\r\n";
 
 public:
     http_ws_mocker(bool server)
@@ -68,6 +69,7 @@ public:
             if (length == 0)
             {
                 fprintf(stderr, "Connection interrupted during handshake.\n");
+                tcp->disconnect();
                 tcp->encoding = original_encoding;
                 return EXIT_FAILURE;
             }
@@ -76,6 +78,10 @@ public:
             if (strcmp(token, this->http_request_check) != 0)
             {
                 fprintf(stderr, "Received invalid request from client: %s\n", token);
+
+                tcp->send(this->http_response_404, strlen(this->http_response_404));
+                tcp->disconnect();
+
                 tcp->encoding = original_encoding;
                 return EXIT_FAILURE;
             }
@@ -85,6 +91,7 @@ public:
             if (length == 0)
             {
                 fprintf(stderr, "Connection interrupted during handshake.\n");
+                tcp->disconnect();
                 tcp->encoding = original_encoding;
                 return EXIT_FAILURE;
             }
@@ -105,6 +112,7 @@ public:
             if (length == 0)
             {
                 fprintf(stderr, "Connection interrupted during handshake.\n");
+                tcp->stop();
                 tcp->encoding = original_encoding;
                 return EXIT_FAILURE;
             }
@@ -114,6 +122,7 @@ public:
             if (length == 0)
             {
                 fprintf(stderr, "Connection interrupted during handshake.\n");
+                tcp->stop();
                 tcp->encoding = original_encoding;
                 return EXIT_FAILURE;
             }
@@ -122,6 +131,7 @@ public:
             if (strcmp(token, this->http_response_check) != 0)
             {
                 fprintf(stderr, "Received invalid response from server: %s\n", token);
+                tcp->stop();
                 tcp->encoding = original_encoding;
                 return EXIT_FAILURE;
             }

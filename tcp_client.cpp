@@ -103,6 +103,7 @@ public:
         close(this->fd);
 
         started = false;
+        connected = false;
 
         return EXIT_SUCCESS;
     }

@@ -103,6 +103,17 @@ public:
         close(this->server_fd);
 
         started = false;
+        connected = false;
+
+        return EXIT_SUCCESS;
+    }
+
+    int disconnect()
+    {
+        printf("Dropping connected client.\n");
+        close(this->client_fd);
+
+        connected = false;
 
         return EXIT_SUCCESS;
     }
