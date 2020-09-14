@@ -1,6 +1,10 @@
 #pragma once
 #include "shared.cpp"
 #include "mocker_base.cpp"
+#include "udp_server.cpp"
+#include "udp_client.cpp"
+#include "tcp_server.cpp"
+#include "tcp_client.cpp"
 
 struct dns_packet_header
 {
@@ -48,6 +52,52 @@ public:
     dns_mocker(struct session* session)
         : dns_mocker(strcmp(session->mocker, "dns_server") == 0)
     {
+    }
+
+    virtual int setup(transport_base *local, transport_base *remote)
+    {
+        if (this->server)
+        {
+            tcp_server* tcp = dynamic_cast<tcp_server*>(local);
+            if (tcp != nullptr)
+            {
+                printf("Overriding TCP transport settings to match length encoding of DNS packets.\n");
+
+                tcp->encoding = LENGTH_16BIT;
+
+                return EXIT_SUCCESS;
+            }
+
+            udp_server* udp = dynamic_cast<udp_server*>(local);
+            if (udp == nullptr)
+            {
+                printf("The dns_server module requires UDP or TCP local to function properly.\n");
+                return EXIT_SUCCESS;
+            }
+
+            return EXIT_SUCCESS;
+        }
+        else
+        {
+            tcp_client* tcp = dynamic_cast<tcp_client*>(remote);
+            if (tcp != nullptr)
+            {
+                printf("Overriding TCP transport settings to match length encoding of DNS packets.\n");
+
+                tcp->encoding = LENGTH_16BIT;
+
+                return EXIT_SUCCESS;
+            }
+
+            udp_client* udp = dynamic_cast<udp_client*>(remote);
+            if (udp == nullptr)
+            {
+                printf("The dns_client module requires UDP or TCP remote to function properly.\n");
+                return EXIT_SUCCESS;
+            }
+
+            return EXIT_SUCCESS;
+        }
     }
 
     virtual int encapsulate(char* message, int length, int* offset)

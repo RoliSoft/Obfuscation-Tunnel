@@ -25,6 +25,11 @@ int loop_transports_select(transport_base *local, transport_base *remote, obfusc
         }
     }
 
+    if (mocker != nullptr)
+    {
+        mocker->setup(local, remote);
+    }
+
     fds[0].fd = local->get_selectable();
     fds[0].events = POLLIN;
     fds[1].fd = remote->get_selectable();
@@ -155,6 +160,11 @@ int loop_transports_thread(transport_base *local, transport_base *remote, obfusc
         {
             return EXIT_FAILURE;
         }
+    }
+
+    if (mocker != nullptr)
+    {
+        mocker->setup(local, remote);
     }
 
     threads[0] = std::thread([](transport_base *local, transport_base *remote, obfuscate_base *obfuscator, mocker_base *mocker)
