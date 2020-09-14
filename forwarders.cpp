@@ -45,17 +45,34 @@ int loop_transports_select(transport_base *local, transport_base *remote, obfusc
     {
         msglen = poll(fds, 2, 3 * 60 * 1000);
 
+        if ((fds[0].revents & (POLLHUP | POLLERR | POLLNVAL)) != 0)
+        {
+            local->restart();
+            fds[0].fd = local->get_selectable();
+
+            if (mocker != nullptr && mocker->can_handshake && mocker->server)
+            {
+                mocker->handshake(local, remote);
+            }
+        }
+
+        if ((fds[1].revents & (POLLHUP | POLLERR | POLLNVAL)) != 0)
+        {
+            remote->restart();
+            fds[1].fd = local->get_selectable();
+
+            if (mocker != nullptr && mocker->can_handshake && !mocker->server)
+            {
+                mocker->handshake(local, remote);
+            }
+        }
+
         if (fds[0].revents == POLLIN)
         {
             msglen = local->receive(buffer + MTU_SIZE, &offset);
 
-            if (msglen == 0)
+            if (msglen < 1)
             {
-                goto next_fd;
-            }
-            else if (msglen < 0)
-            {
-                local->restart();
                 goto next_fd;
             }
 
@@ -97,13 +114,8 @@ int loop_transports_select(transport_base *local, transport_base *remote, obfusc
         {
             msglen = remote->receive(buffer + MTU_SIZE, &offset);
 
-            if (msglen == 0)
+            if (msglen < 1)
             {
-                continue;
-            }
-            else if (msglen < 0)
-            {
-                remote->restart();
                 continue;
             }
 
@@ -147,6 +159,8 @@ int loop_transports_select(transport_base *local, transport_base *remote, obfusc
     return run ? EXIT_FAILURE : EXIT_SUCCESS;
 }
 
+volatile bool block_local, block_remote;
+
 int loop_transports_thread(transport_base *local, transport_base *remote, obfuscate_base *obfuscator, mocker_base *mocker)
 {
     std::thread threads[2];
@@ -182,15 +196,25 @@ int loop_transports_thread(transport_base *local, transport_base *remote, obfusc
         char buffer[MTU_SIZE * 3];
         while (run)
         {
+            while (block_local)
+            {
+                sleep(1);
+            }
+
             msglen = local->receive(buffer + MTU_SIZE, &offset);
 
-            if (msglen == 0)
+            if (msglen < 1)
             {
-                continue;
-            }
-            else if (msglen < 0)
-            {
+                block_remote = true;
+
                 local->restart();
+
+                if (mocker != nullptr && mocker->can_handshake && mocker->server)
+                {
+                    mocker->handshake(local, remote);
+                }
+
+                block_remote = false;
                 continue;
             }
 
@@ -234,15 +258,25 @@ int loop_transports_thread(transport_base *local, transport_base *remote, obfusc
         char buffer[MTU_SIZE * 3];
         while (run)
         {
+            while (block_remote)
+            {
+                sleep(1);
+            }
+
             msglen = remote->receive(buffer + MTU_SIZE, &offset);
 
-            if (msglen == 0)
+            if (msglen < 1)
             {
-                continue;
-            }
-            else if (msglen < 0)
-            {
+                block_local = true;
+
                 remote->restart();
+
+                if (mocker != nullptr && mocker->can_handshake && !mocker->server)
+                {
+                    mocker->handshake(local, remote);
+                }
+
+                block_local = false;
                 continue;
             }
 
