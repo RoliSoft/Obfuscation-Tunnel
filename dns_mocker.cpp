@@ -35,7 +35,7 @@ private:
 
 public:
     dns_mocker(bool server)
-        : mocker_base(server)
+        : mocker_base(server, false, true)
     {
         memset(&this->header, 0, sizeof(this->header));
         this->header.transaction_id = htons(0x1337);

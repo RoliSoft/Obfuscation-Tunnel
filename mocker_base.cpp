@@ -7,9 +7,18 @@
 class mocker_base
 {
 public:
+    bool can_handshake;
+    bool can_encapsulate;
     bool server;
 
     virtual int setup(transport_base *local, transport_base *remote)
+    {
+        (void)local;
+        (void)remote;
+        return EXIT_SUCCESS;
+    }
+
+    virtual int handshake(transport_base *local, transport_base *remote)
     {
         (void)local;
         (void)remote;
@@ -31,8 +40,8 @@ public:
     }
 
 protected:
-    mocker_base(bool server)
-        : server(server)
+    mocker_base(bool server, bool can_handshake, bool can_encapsulate)
+        : can_handshake(can_handshake), can_encapsulate(can_encapsulate), server(server)
     {
     }
 

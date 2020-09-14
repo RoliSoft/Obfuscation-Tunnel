@@ -312,12 +312,12 @@ void print_help(char* argv[])
     printf("   -r endpoint\tRemote host to tunnel packets to.\n");
     printf("   -o [mode]\tEnable packet obfuscation. Possible values:\n   \t\t  header - Simple generic header obfuscation (Default)\n   \t\t  xor - XOR packet obfuscation with rolling key\n");
     printf("   -k key\tSpecifies a key for the obfuscator module.\n");
-    printf("   -m mode\tEnable protocol imitator. Possible values:\n   \t\t  dns_client - Send data as A queries to remote\n   \t\t  dns_server - Reply to A queries on local\n");
+    printf("   -m mode\tEnable protocol imitator. Possible values:\n   \t\t  dns_client - Send data as A queries to remote\n   \t\t  dns_server - Reply to A queries on local\n   \t\t  http_ws_client - Masquarade as HTTP WebSocket stream\n   \t\t  http_ws_server - Accept data in HTTP WebSocket streams\n");
     printf("   -s\t\tDisable multithreading, multiplex sockets instead.\n");
     printf("   -v\t\tDetailed logging at the expense of decreased throughput.\n");
     printf("   -h\t\tDisplays this message.\n");
     printf("\nTCP-specific arguments:\n\n");
-    printf("   -e\t\tType of encoding to use for the length header. Possible values:\n   \t\t  v - 7-bit encoded variable-length header (Default)\n   \t\t  s - 2-byte unsigned short\n   \t\t  n - None (Not recommended)\n");
+    printf("   -e\t\tType of encoding to use for the length header:\n   \t\t  v - 7-bit encoded variable-length header (Default)\n   \t\t  s - 2-byte unsigned short\n   \t\t  n - None (Not recommended)\n");
     printf("\nICMP/ICMPv6-specific arguments:\n\n");
 #if HAVE_PCAP
     printf("   -p [if]\tUse PCAP for inbound, highly recommended.\n   \t\t  Optional value, defaults to default gateway otherwise.\n");

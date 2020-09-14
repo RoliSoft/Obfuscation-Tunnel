@@ -12,6 +12,7 @@
 #include "simple_obfuscator.cpp"
 #include "xor_obfuscator.cpp"
 #include "dns_mocker.cpp"
+#include "http_ws_mocker.cpp"
 
 transport_base* create_transport(int protocol, struct sockaddr_in *address, bool server, struct session *session)
 {
@@ -69,6 +70,10 @@ mocker_base* create_mocker(struct session *session)
     else if (strcmp(session->mocker, "dns_client") == 0 || strcmp(session->mocker, "dns_server") == 0)
     {
         return new dns_mocker(session);
+    }
+    else if (strcmp(session->mocker, "http_ws_client") == 0 || strcmp(session->mocker, "http_ws_server") == 0)
+    {
+        return new http_ws_mocker(session);
     }
     else
     {

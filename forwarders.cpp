@@ -2,8 +2,7 @@
 #include "shared.cpp"
 #include "transport_base.cpp"
 #include "obfuscate_base.cpp"
-
-#include "dns_mocker.cpp"
+#include "mocker_base.cpp"
 
 int loop_transports_select(transport_base *local, transport_base *remote, obfuscate_base *obfuscator, mocker_base *mocker)
 {
@@ -28,6 +27,11 @@ int loop_transports_select(transport_base *local, transport_base *remote, obfusc
     if (mocker != nullptr)
     {
         mocker->setup(local, remote);
+
+        if (mocker->can_handshake)
+        {
+            mocker->handshake(local, remote);
+        }
     }
 
     fds[0].fd = local->get_selectable();
@@ -55,7 +59,7 @@ int loop_transports_select(transport_base *local, transport_base *remote, obfusc
                 goto next_fd;
             }
 
-            if (mocker != nullptr && mocker->server)
+            if (mocker != nullptr && mocker->can_encapsulate && mocker->server)
             {
                 msglen = mocker->decapsulate(buffer + MTU_SIZE, msglen, &offset);
 
@@ -75,7 +79,7 @@ int loop_transports_select(transport_base *local, transport_base *remote, obfusc
                 }
             }
 
-            if (mocker != nullptr && !mocker->server)
+            if (mocker != nullptr && mocker->can_encapsulate && !mocker->server)
             {
                 msglen = mocker->encapsulate(buffer + MTU_SIZE, msglen, &offset);
 
@@ -103,7 +107,7 @@ int loop_transports_select(transport_base *local, transport_base *remote, obfusc
                 continue;
             }
 
-            if (mocker != nullptr && !mocker->server)
+            if (mocker != nullptr && mocker->can_encapsulate && !mocker->server)
             {
                 msglen = mocker->decapsulate(buffer + MTU_SIZE, msglen, &offset);
 
@@ -123,7 +127,7 @@ int loop_transports_select(transport_base *local, transport_base *remote, obfusc
                 }
             }
 
-            if (mocker != nullptr && mocker->server)
+            if (mocker != nullptr && mocker->can_encapsulate && mocker->server)
             {
                 msglen = mocker->encapsulate(buffer + MTU_SIZE, msglen, &offset);
 
@@ -165,6 +169,11 @@ int loop_transports_thread(transport_base *local, transport_base *remote, obfusc
     if (mocker != nullptr)
     {
         mocker->setup(local, remote);
+
+        if (mocker->can_handshake)
+        {
+            mocker->handshake(local, remote);
+        }
     }
 
     threads[0] = std::thread([](transport_base *local, transport_base *remote, obfuscate_base *obfuscator, mocker_base *mocker)
@@ -185,7 +194,7 @@ int loop_transports_thread(transport_base *local, transport_base *remote, obfusc
                 continue;
             }
 
-            if (mocker != nullptr && mocker->server)
+            if (mocker != nullptr && mocker->can_encapsulate && mocker->server)
             {
                 msglen = mocker->decapsulate(buffer + MTU_SIZE, msglen, &offset);
 
@@ -205,7 +214,7 @@ int loop_transports_thread(transport_base *local, transport_base *remote, obfusc
                 }
             }
 
-            if (mocker != nullptr && !mocker->server)
+            if (mocker != nullptr && mocker->can_encapsulate && !mocker->server)
             {
                 msglen = mocker->encapsulate(buffer + MTU_SIZE, msglen, &offset);
 
@@ -237,7 +246,7 @@ int loop_transports_thread(transport_base *local, transport_base *remote, obfusc
                 continue;
             }
 
-            if (mocker != nullptr && !mocker->server)
+            if (mocker != nullptr && mocker->can_encapsulate && !mocker->server)
             {
                 msglen = mocker->decapsulate(buffer + MTU_SIZE, msglen, &offset);
 
@@ -257,7 +266,7 @@ int loop_transports_thread(transport_base *local, transport_base *remote, obfusc
                 }
             }
 
-            if (mocker != nullptr && mocker->server)
+            if (mocker != nullptr && mocker->can_encapsulate && mocker->server)
             {
                 msglen = mocker->encapsulate(buffer + MTU_SIZE, msglen, &offset);
 
