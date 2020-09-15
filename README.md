@@ -369,6 +369,67 @@ MTU = 1300
 
 There is no need to edit anything on the server-side, so it will work perfectly even if you do not have access to the destination Wireguard server, as it is for example a commercial VPN provider.
 
+## MTU detection
+
+Two scripts are provided within the repository which can be used to measure the maximum transmission unit over your connection within your tunneling setup (transports used, encapsulation, obfuscation, etc).
+
+The `mtu-server.py` script creates a simple UDP server, and replies with the length and checksum of every packet received:
+
+```
+$ ./mtu-server.py
+usage: ./mtu-server.py port
+```
+
+The `mtu-tester.py` script tries to determine which is the largest packet that the MTU server can safely receive and reply to. It uses binary search to efficiently pin-point the MTU for packet sizes between 1 and 10,000 bytes by default:
+
+```
+$ ./mtu-tester.py
+usage: ./mtu-tester.py host port
+```
+
+Example usage to measure the MTU of a DNS-encapsulation tunnel:
+
+```
+client$ ./tunnel -l udp:127.0.0.1:8080 -r udp:server:53 -m dns_client -o xor -v
+Obfuscating packets with XOR and built-in key.
+Encapsulating packets into DNS queries.
+Started UDP server at 127.0.0.1:8080
+Started UDP client for server:53
+[...]
+
+server$ ./tunnel -l udp:0.0.0.0:53 -r udp:127.0.0.1:8080 -m dns_server -o xor -v
+Obfuscating packets with XOR and built-in key.
+Encapsulating packets into DNS replies.
+Started UDP server at 0.0.0.0:53
+Started UDP client for 127.0.0.1:8080
+[...]
+
+client$ ./mtu-tester.py 127.0.0.1 8080                 │ server$ ./mtu-server.py 8080
+Testing with endpoint at ('127.0.0.1', 8080)           │ Listening at ('0.0.0.0', 8080)
+Trying 5000 bytes: incorrect size received from server │ Received 1482 bytes
+Trying 2500 bytes: incorrect size received from server │ Received 1482 bytes
+Trying 1250 bytes: correct data                        │ Received 1250 bytes
+Trying 1875 bytes: incorrect size received from server │ Received 1482 bytes
+Trying 1562 bytes: incorrect size received from server │ Received 1482 bytes
+Trying 1406 bytes: correct data                        │ Received 1406 bytes
+Trying 1484 bytes: incorrect size received from server │ Received 1482 bytes
+Trying 1445 bytes: correct data                        │ Received 1445 bytes
+Trying 1464 bytes: correct data                        │ Received 1464 bytes
+Trying 1474 bytes: correct data                        │ Received 1474 bytes
+Trying 1479 bytes: correct data                        │ Received 1479 bytes
+Trying 1481 bytes: correct data                        │ Received 1481 bytes
+Trying 1482 bytes: correct data                        │ Received 1482 bytes
+Trying 1483 bytes: incorrect size received from server │ Received 1482 bytes
+MTU: 1482                                              │
+```
+
+Knowing the tunnel can safely encapsulate at maximum 1,482 bytes, we can now set the MTU of the VPN interface to this value, and the connection should not be unstable anymore due to dropped or incomplete packets:
+
+```
+[Interface]
+MTU = 1482
+```
+
 ## Benchmark
 
 The setup chosen for the benchmark is that a local PC is connected behind a firewalled router to a public server acting as a gateway. The gateway server then forwards all packets to CloudFlare Warp.
