@@ -77,6 +77,8 @@ struct session
     char *key;
     int key_length;
     char *mocker;
+    bool fragment;
+    char *domain;
 #if HAVE_PCAP
     bool pcap;
     char *cap_dev;
@@ -323,6 +325,9 @@ void print_help(char* argv[])
     printf("   -p [if]\tUse PCAP for inbound, highly recommended.\n   \t\t  Optional value, defaults to default gateway otherwise.\n");
 #endif
     printf("   -x\t\tExpect identifier and sequence randomization.\n   \t\t  Not recommended, see documentation for pros and cons.\n");
+    printf("\nDNS-specific arguments:\n\n");
+    printf("   -f\t\tBase32-encode data and fragment labels on 60-byte boundaries.\n");
+    printf("   -d domain\tOptional domain to append to queries and responses.\n");
 }
 
 int parse_protocol_tag(char *tag)
@@ -458,7 +463,7 @@ int parse_arguments(int argc, char* argv[], struct session *s)
     memset(s, 0, sizeof(*s));
 
     int opt;
-    while((opt = getopt(argc, argv, ":hl:r:o:p:sk:m:ve:x")) != -1)
+    while((opt = getopt(argc, argv, ":hl:r:o:p:sk:m:ve:xfd:")) != -1)
     {
         if (opt == ':' && optopt != opt)
         {
@@ -542,6 +547,14 @@ int parse_arguments(int argc, char* argv[], struct session *s)
 
             case 'm':
                 s->mocker = optarg;
+                break;
+
+            case 'f':
+                s->fragment = true;
+                break;
+
+            case 'd':
+                s->domain = optarg;
                 break;
         }
     }
