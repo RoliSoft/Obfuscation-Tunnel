@@ -36,8 +36,9 @@ def try_bytes(sock, count):
             print("malformed data received")
             return False
 
-        if int(match.group(1), 16) != count:
-            print("incorrect size received from server")
+        rcount = int(match.group(1), 16)
+        if rcount != count:
+            print("incorrect size received from server (%d diff)" % (rcount - count))
             return False
 
         if int(match.group(2), 16) != binascii.crc32(message):
@@ -46,6 +47,9 @@ def try_bytes(sock, count):
 
         print("correct data")
         return True
+    except UnicodeDecodeError:
+        print("malformed data received")
+        return False
     except socket.timeout:
         print("failed to receive reply")
         return False
