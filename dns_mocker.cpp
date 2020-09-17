@@ -35,8 +35,7 @@ struct dns_packet_answer_footer
     unsigned short type;
     unsigned short q_class;
     unsigned int ttl;
-    unsigned short length;
-    unsigned int address;
+    unsigned short data_length;
     // end of answer 1
 } __attribute__((packed));
 
@@ -51,6 +50,8 @@ public:
     bool fragment;
     char* domain;
     int domain_len = 0;
+    char last_domain[MTU_SIZE];
+    int last_domain_len = 0;
 
     dns_mocker(bool server, bool fragment, char *domain)
         : mocker_base(server, false, true), fragment(fragment), domain(domain)
@@ -61,17 +62,15 @@ public:
         this->header.questions = htons(0x0001);
 
         memset(&this->footer, 0, sizeof(this->footer));
-        this->footer.type = htons(0x0001); // type A
+        this->footer.type = this->fragment ? htons(0x0010) : htons(0x0001); // fragment ? type TXT : type A
         this->footer.q_class = htons(0x0001);
 
         memset(&this->answer_footer, 0, sizeof(this->answer_footer));
         this->answer_footer.question = this->footer;
         this->answer_footer.name_ref = htons(0xc00c); // 0xc00c references the 12th byte in the header which is this->header.length
-        this->answer_footer.type = htons(0x0001);
+        this->answer_footer.type = this->fragment ? htons(0x0010) : htons(0x0001);
         this->answer_footer.q_class = htons(0x0001);
-        this->answer_footer.ttl = htonl(0x0000012c);
-        this->answer_footer.length = htons(0x0004);
-        this->answer_footer.address = htonl(0x01010101);
+        this->answer_footer.ttl = htonl(0x0000012c); // 5 mins
 
         if (domain != nullptr && domain[0] != 0)
         {
@@ -111,17 +110,16 @@ public:
     {
     }
 
-    static int base32_decode(const uint8_t *encoded, uint8_t *result, int bufSize)
+    static int base32_decode(const uint8_t *encoded, uint8_t *result, int buf_size, int boundary)
     {
         int buffer = 0;
         int bitsLeft = 0;
         int count = 0;
 
-        for (int i = 0, fragment = 0; count < bufSize && encoded[i]; i++, fragment++)
+        for (int i = 0, fragment = 0; count < buf_size && encoded[i]; i++, fragment++)
         {
-            if (fragment != 0 && fragment % 60 == 0)
+            if (fragment != 0 && fragment % boundary == 0)
             {
-                printf("flag %d %d\n", i, fragment);
                 fragment = -1;
                 continue;
             }
@@ -138,8 +136,7 @@ public:
             } else if (ch >= '2' && ch <= '7') {
                 ch -= '2' - 26;
             } else {
-                printf("errpos %d\n", i);
-                fprintf(stderr, "Invalid character 0x%02hhx in base-32 string.\n", ch);
+                fprintf(stderr, "Invalid character at position %d 0x%02hhx in base-32 string.\n", i, ch);
                 return -1;
             }
 
@@ -153,14 +150,14 @@ public:
             }
         }
 
-        if (count < bufSize) {
+        if (count < buf_size) {
             result[count] = '\000';
         }
 
         return count;
     }
 
-    static int base32_encode(const uint8_t *data, int length, uint8_t *result, int bufSize)
+    static int base32_encode(const uint8_t *data, int length, uint8_t *result, int buf_size, int boundary)
     {
         int count = 0;
         int lastFlag = -1;
@@ -172,7 +169,7 @@ public:
             int next = 1;
             int bitsLeft = 8;
             
-            while (count < bufSize && (bitsLeft > 0 || next < length))
+            while (count < buf_size && (bitsLeft > 0 || next < length))
             {
                 if (bitsLeft < 5)
                 {
@@ -194,11 +191,11 @@ public:
                 bitsLeft -= 5;
                 result[count++] = "abcdefghijklmnopqrstuvwxyz234567"[index];
 
-                if ((count - flagCount) % 60 == 0)
+                if ((count - flagCount) % boundary == 0)
                 {
                     flagCount++;
                     lastFlag = count;
-                    result[count++] = 60;
+                    result[count++] = boundary;
                 }
             }
         }
@@ -208,7 +205,7 @@ public:
             result[lastFlag] = count - lastFlag - 1;
         }
 
-        if (count < bufSize)
+        if (count < buf_size)
         {
             result[count] = '\000';
         }
@@ -262,59 +259,188 @@ public:
         }
     }
 
-    virtual int encapsulate(char* message, int length, int* offset)
+    static inline int _encapsulate_fake(char* message, int length, int* offset, struct dns_packet_header *header, struct dns_packet_footer *footer)
     {
-        this->header.length = (unsigned char)min(length, UCHAR_MAX);
-        this->header.answer_rrs = this->server && this->fragment ? htons(0x0001) : 0;
+        header->length = (unsigned char)min(length, UCHAR_MAX);
+        return _encapsulate(message, length, offset, (char*)header, sizeof(*header), (char*)footer, sizeof(*footer));
+    }
 
-        if (this->fragment)
-        {
-            char processed[MTU_SIZE * 2];
-            int blen = base32_encode((const unsigned char*)message + *offset, length, (unsigned char*)&processed, sizeof(processed));
-            memcpy(message + *offset, &processed, blen);
-            length = blen;
-            this->header.length = (unsigned char)min(length, 60);
-        }
+    static inline int _decapsulate_fake(char* message, int length, int* offset, int header_size, int footer_size)
+    {
+        return _decapsulate(message, length, offset, header_size, footer_size);
+    }
+
+    virtual int _encapsulate_real_req(char* message, int length, int* offset)
+    {
+        // client -> server
+        // questions 1 answers 0 question [message]
+
+        this->header.questions = htons(0x0001);
+        this->header.answer_rrs = 0;
+
+        char processed[MTU_SIZE * 2];
+        int blen = base32_encode((const unsigned char*)message + *offset, length, (unsigned char*)&processed, sizeof(processed), 60);
+        memcpy(message + *offset, &processed, blen);
+        length = blen;
+        this->header.length = (unsigned char)min(length, 60);
 
         if (this->domain_len != 0)
         {
             length = _encapsulate(message, length, offset, nullptr, 0, this->domain, this->domain_len);
         }
 
-        return _encapsulate(message, length, offset, (char*)&this->header, sizeof(this->header), this->server && this->fragment ? (char*)&this->answer_footer : (char*)&this->footer, this->server && this->fragment ? sizeof(this->answer_footer) : sizeof(this->footer));
+        return _encapsulate(message, length, offset, (char*)&this->header, sizeof(this->header), (char*)&this->footer, sizeof(this->footer));
+    }
+
+    virtual int _encapsulate_real_resp(char* message, int length, int* offset)
+    {
+        // server -> client
+        // questions 1 answers 1 question [last_domain] answer [message]
+
+        this->header.questions = htons(0x0001);
+        this->header.answer_rrs = htons(0x0001);
+        this->header.length = 0; // last_domain[0] already has it
+
+        char processed[MTU_SIZE * 2];
+        int blen = base32_encode((const unsigned char*)message + *offset, length, (unsigned char*)&processed + 1, sizeof(processed) - 1, 0xff);
+        
+        *(unsigned char*)&processed = (unsigned char)(length > 0xff ? 0xff : blen);
+        memcpy(message + *offset, &processed, blen + 1);
+
+        length = blen + 1;
+        this->answer_footer.data_length = ntohs(length);
+
+        // answer + base32
+        length = _encapsulate(message, length, offset, (char*)&this->answer_footer, sizeof(this->answer_footer), nullptr, 0);
+
+        // last_domain + answer + base32
+        length = _encapsulate(message, length, offset, (char*)&this->last_domain, this->last_domain_len - 1, nullptr, 0);
+
+        // header(question) + last_domain + answer + base32
+        length = _encapsulate(message, length, offset, (char*)&this->header, sizeof(this->header) - 1, nullptr, 0);
+
+        return length;
+    }
+
+    virtual int _decapsulate_real_req(char* message, int length, int* offset)
+    {
+        length = _decapsulate(message, length, offset, sizeof(this->header), 0);
+
+        if (this->domain_len != 0)
+        {
+            char *pos = (char*)memmem(message + *offset, length, this->domain, this->domain_len);
+
+            if (pos == nullptr)
+            {
+                fprintf(stderr, "Domain not found in DNS response, abandoning.\n");
+                return -1;
+            }
+
+            int diff = -(message + *offset - pos) + this->domain_len;
+            length -= diff;
+            *offset += diff;
+        }
+
+        char *answer = (char*)memmem(message + *offset, length, &this->answer_footer.name_ref, sizeof(unsigned short) * 3);
+
+        if (answer == nullptr)
+        {
+            fprintf(stderr, "TXT section not found in DNS response, abandoning.\n");
+            return -1;
+        }
+
+        int diff = -(message + *offset - answer);
+        int skip_txt = sizeof(unsigned short) * 6 + 1;
+        answer[length - diff] = 0;
+
+        char processed[MTU_SIZE * 2];
+        int blen = base32_decode((const unsigned char*)answer + skip_txt, (unsigned char*)&processed, sizeof(processed), 0xff);
+
+        if (blen < 1)
+        {
+            fprintf(stderr, "Failed to decode base32-encoded DNS payload.\n");
+            return blen;
+        }
+
+        memcpy(message + *offset, &processed, blen);
+        length = blen;
+
+        return length;
+    }
+
+    virtual int _decapsulate_real_resp(char* message, int length, int* offset)
+    {
+        this->header.transaction_id = ((unsigned short*)(message + *offset))[0];
+        length = _decapsulate(message, length, offset, sizeof(this->header), this->domain_len != 0 ? 0 : sizeof(this->footer));
+
+        if (this->domain_len != 0)
+        {
+            char *pos = (char*)memmem(message + *offset, length, this->domain, this->domain_len);
+
+            if (pos == nullptr)
+            {
+                fprintf(stderr, "Domain not found in DNS query, abandoning.\n");
+                return -1;
+            }
+
+            length = -(message + *offset - pos);
+
+            memcpy(&this->last_domain, message + *offset - 1, length + 1 + this->domain_len + 1);
+            this->last_domain_len = length + 1 + this->domain_len + 1;
+
+            *(message + *offset + length) = 0;
+        }
+
+        char processed[MTU_SIZE * 2];
+        int blen = base32_decode((const unsigned char*)message + *offset, (unsigned char*)&processed, sizeof(processed), 60);
+
+        if (blen < 1)
+        {
+            fprintf(stderr, "Failed to decode base32-encoded DNS payload.\n");
+            return blen;
+        }
+
+        memcpy(message + *offset, &processed, blen);
+        length = blen;
+
+        return length;
+    }
+
+    virtual int encapsulate(char* message, int length, int* offset)
+    {
+        if (!this->fragment)
+        {
+            return _encapsulate_fake(message, length, offset, &this->header, &this->footer);
+        }
+        else
+        {
+            if (this->server)
+            {
+                return _encapsulate_real_resp(message, length, offset);
+            }
+            else
+            {
+                return _encapsulate_real_req(message, length, offset);
+            }
+        }
     }
 
     virtual int decapsulate(char* message, int length, int* offset)
     {
-        if (this->server)
+        if (!this->fragment)
         {
-            this->header.transaction_id = ((unsigned short*)(message + *offset))[0];
+            return _decapsulate_fake(message, length, offset, sizeof(this->header), sizeof(this->footer));
         }
-
-        length = _decapsulate(message, length, offset, sizeof(this->header), !this->server && this->fragment ? sizeof(this->answer_footer) : sizeof(this->footer));
-
-        if (this->domain_len != 0)
+        else
         {
-            length = _decapsulate(message, length, offset, 0, this->domain_len);
-            *(message + *offset + length) = 0;
-        }
-
-        if (this->fragment)
-        {
-            char processed[MTU_SIZE * 2];
-            int blen = base32_decode((const unsigned char*)message + *offset, (unsigned char*)&processed, sizeof(processed));
-
-            if (blen < 1)
+            if (this->server)
             {
-                hexdump(message + *offset, length);
-                fprintf(stderr, "Failed to decode base32-encoded DNS payload.\n");
-                return blen;
+                return _decapsulate_real_resp(message, length, offset);
             }
-
-            memcpy(message + *offset, &processed, blen);
-            length = blen;
+            else
+            {
+                return _decapsulate_real_req(message, length, offset);
+            }
         }
-
-        return length;
     }
 };
