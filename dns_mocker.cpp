@@ -314,7 +314,10 @@ public:
         length = _encapsulate(message, length, offset, (char*)&this->answer_footer, sizeof(this->answer_footer), nullptr, 0);
 
         // last_domain + answer + base32
-        length = _encapsulate(message, length, offset, (char*)&this->last_domain, this->last_domain_len - 1, nullptr, 0);
+        if (this->domain_len != 0)
+        {
+            length = _encapsulate(message, length, offset, (char*)&this->last_domain, this->last_domain_len - 1, nullptr, 0);
+        }
 
         // header(question) + last_domain + answer + base32
         length = _encapsulate(message, length, offset, (char*)&this->header, sizeof(this->header) - 1, nullptr, 0);

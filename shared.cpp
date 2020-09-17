@@ -327,7 +327,7 @@ void print_help(char* argv[])
     printf("   -x\t\tExpect identifier and sequence randomization.\n   \t\t  Not recommended, see documentation for pros and cons.\n");
     printf("\nDNS-specific arguments:\n\n");
     printf("   -f\t\tBase32-encode data and fragment labels on 60-byte boundaries.\n");
-    printf("   -d domain\tOptional domain to append to queries and responses.\n");
+    printf("   -d domain\tOptional domain name to act as the authoritative resolver for.\n");
 }
 
 int parse_protocol_tag(char *tag)
