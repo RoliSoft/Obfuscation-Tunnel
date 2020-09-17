@@ -41,6 +41,11 @@ ICMP/ICMPv6-specific arguments:
                   Optional value, defaults to default gateway otherwise.
    -x           Expect identifier and sequence randomization.
                   Not recommended, see documentation for pros and cons.
+
+DNS-specific arguments:
+
+   -f           Base32-encode data and fragment labels on 60-byte boundaries.
+   -d domain    Optional domain name to act as the authoritative resolver for.
 ```
 
 Example for UDP-to-UDP tunnel:
@@ -184,7 +189,7 @@ When used together with an obfuscator, the obfuscator will process the data befo
 
 The DNS imitator can be turned on using the `-m dns_client` flag on the local server, and with `-m dns_server` on the gateway server. It can work on top of the UDP and TCP transports, as DNS supports both. (Note that it can be run with ICMP endpoints as well, but a warning will be produced by the application, as it does not make much sense to encapsulate ICMP Echo Requests into DNS queries.)
 
-The module will send DNS A queries to the remote server, which will reply with DNS A responses, where the "hostname" field will contain your data. The module does not try to emulate a complete DNS server, only produce DNS-like traffic, as such it will not be able to properly respond to DNS requests that are not from this application.
+The module will send DNS `A` queries to the remote server, which will reply with DNS `A` responses, where the "hostname" field will contain your data. The module does not try to emulate a complete DNS server, only produce DNS-like traffic, as such it will not be able to properly respond to DNS requests that are not from this application.
 
 The DNS packets will look completely valid as long as the data sent is up to 255 bytes in length and plain-text. While the module will send binary bytes beyond 255 in length, these packets may be identified as corrupted by the firewall or other packet sniffers.
 
@@ -225,6 +230,102 @@ localhost   test_server     DNS          62         Standard query 0x1337 A test
 ```
 
 The gateway server will then extract the data from the DNS packet before forwarding it to the remote server.
+
+### Tunneling over public DNS servers
+
+While the original purpose of the DNS imitator was to modify UDP packets to look like DNS requests, but not actually produce completely valid DNS requests that can be sent to public DNS servers, very experimental support has been added through the use of the `-f` and `-d` flags, that should be treated more as a proof-of-concept, rather than an "official feature" of the application.
+
+The original implementation (that is still used when `-f -d` is not specified) shoved binary data as-is into the label field of the DNS request. This worked for IDS systems to identify the packet as DNS, and for Wireshark to parse it, however, once sent to a real DNS server, it was replied to with `SERVFAIL` due to the incorrect formatting of the labels. Turning on the `-f` flag, the application will make the following changes to the DNS packet crafting step:
+
+- Base-32 encode the data and break it up to 60-byte pieces, as a DNS label can have a maximum of approximately 65 bytes per label. (In other words, that is the maximum length of a single subdomain name.)
+- Change the request and response types from `A` to `TXT`, as it can fit data more easily during response, now that it has to "play by the rules".
+- Keep track of the request domain, since public DNS servers will not forward responses to requests with differing DNS names, even if the transaction ID matches.
+- Place the base-32 encoded response data into the `TXT` field of the packet, as an answer referencing the original request domain name.
+
+The `-d` flag can be used to append a domain name to the request label. Once a packet crafted with the `-f` flag turned on is sent to a public DNS, it will send it to the registered nameserver of the domain specified with the `-d` flag.
+
+#### Setup
+
+In order to receive DNS request packets on your server for your domain, you first have to designate a zone (a subdomain) to have the authoritative nameserver set to the IP of your server.
+
+In other words, you need to create a `NS` record for a subdomain you do not currently use, that points to another subdomain within your domain which has an `A` or `AAAA` record pointing to the server you want to receive the UDP packets for that subdomain on.
+
+For example, if you want to receive packets for the lookups on public DNSes for the `*.t.example.com` zone, you need to create the following records:
+
+```
+t    IN  NS  ns.example.com.
+ns   IN  A   123.45.67.89
+```
+
+This will make sure that once something tries to resolve anything `*.t.example.com`, the public DNS server will forward the packet to the nameserver responsible for it, `ns.example.com`, which has the address of your server, `123.45.67.89`.
+
+You can quickly test this by running a netcat listener on your server on UDP port 53, and then try to resolve a domain from a separate computer, that would belong to that subdomain:
+
+```
+client$ nslookup test.t.example.com 1.1.1.1         | server$ nc -lu4vvp 53
+Server:         1.1.1.1                             | Ncat: Version 7.70 ( https://nmap.org/ncat )
+Address:        1.1.1.1#53                          | Ncat: Listening on 0.0.0.0:53
+                                                    | Ncat: Connection from 162.158.17.35.
+** server can't find test.t.example.com: SERVFAIL   | ��testtexamplecom)��
+```
+
+If you see your domain name in the netcat output, the test was successful. (The `SERVFAIL` for nslookup happened because your netcat listener didn't reply with a valid DNS packet before timeout.)
+
+You should strive to use the shortest domain you own and set a 1-character subdomain on it, so you leave more space for data in your DNS packets, as discussed in later sections regarding the transmittable payload size issue.
+
+#### Example usage
+
+If you would like to tunnel UDP packets from port 8080 to the same port on the remote server at dns.example.com, over the Google Public DNS for example, you can run the following commands:
+
+```
+server$ ./tunnel -l udp:0.0.0.0:53 -r udp:127.0.0.1:8080 -m dns_server -f -d t.example.com
+client$ ./tunnel -l udp:127.0.0.1:8080 -r udp:8.8.8.8:53 -m dns_client -f -d t.example.com
+```
+
+Any packets sent to the local 8080 UDP port will be base-32 encoded, and a "DNS lookup" will be made with the DNS server located at 8.8.8.8, for the domain `<base32data>.dns.example.com`. The DNS server will then forward the DNS request packet to your server (as long as you have correctly set the NS record on dns.example.com to point to your own server), where a `TXT` reply packet will be sent back to the public DNS server, and forwarded back to you based on the transaction ID.
+
+#### Caveats
+
+**Caveat 1**: Increased latency
+
+Public DNS servers are rate-limited and throttled, so you will not able to spam them with 1 Gbit of DNS packets and expect similar-rate reply. By only sending a few packets per second, and the MTU of those being very limited, any VPN connection tunneled over DNS will not work as expected. However, it _can_ be used for sending small packets back and forth without any issues, other than the ones being discussed in this section.
+
+According to the Google Public DNS documentation, you will be blocked after attempting 1000 queries per second from the same IP. Cloudflare does not publish such a figure, but there are reports of IP blocks when huge volume of traffic is generated.
+
+**Caveat 2**: Increased packet loss
+
+One of the biggest issues in DNS tunneling, is that you can only reply to valid packets sent to you by the DNS server only once. This means that for each packet generated on your local server, turned into a DNS request, the remote server can only send one reply.
+
+Furthermore, DNS servers will automatically reply with `SERVFAIL` after waiting for a certain period of time for a reply from your server, and it does not come.
+
+All in all, it will work great for UDP protocols where there is an immediate response for each request, and no more data is sent afterwards by the server, however, it will not work if the server behind the tunnel takes too long to reply or wants to send data after the fact.
+
+**Caveat 3**: Decreased MTU
+
+Due to the limitations on the DNS label fields that you can put in the request packet, your upstream MTU will be severely limited as well. A DNS label (essentially a component "between the dots", or a subdomain name, for example) is limited to approximately 65 bytes per label. It is also limited to case-insensitive plain-text content only, so binary data needs to be base-32 encoded, which further reduces the amount of binary data you can transmit.
+
+For responses, the DNS packet needs needs to include the original request in the reply, which leaves less room for response data if your request was too long.
+
+This all makes the maximum transmission unit of such a DNS tunneling very low. Take these numbers as a reference, as there can be a few other influenting factors, such as the length of your domain name, and lower UDP MTU on your connection:
+
+| Mode                  | Upstream | Downstream |
+|-----------------------|----------|------------|
+| Direct                | 1482     | 1482       |
+| Direct with `-f`      | 914      | 915        |
+| Direct with `-f/d`    | 880      | 898        |
+| Google DNS            | 147      | 283        |
+| Cloudflare DNS        | 147      | 283        |
+| Quad9 <sup>1</sup>    | 2 ~ 136  | 281        |
+| OpenDNS               | 36       | 283        |
+| Residential ISP       | 147      | 158        |
+
+1. Quad9 forwarded the queries to the server correctly, but most of the times replied with `SERVFAIL` instead of forwarding the bigger packets back. The downstream, that is decoded bytes in the `TXT` section of the reply, was constantly 281, but larger upstream packets, that is decoded bytes stored as part of the domain lookup, were randomly dropped. It might be possible that Quad9 has a system for recognizing malicious looking domains, and most of the times the confidence score on the tunnel domains were above the threshold.
+
+#### Comparison with iodine/dnscat
+
+The applications which were specifically written for DNS tunneling have code for probing what types of DNS packets you can send through the chain, in order to maximize MTU. Furthermore, they also have a "traffic manager" component, where large data is split up and sent in batch, then small requests are continously made for polling purposes, to see if there is any data to be received.
+
+This application has support for generating valid DNS packets more as a proof-of-concept, and you should be not using it over iodine/dnscat, unless your use-case fits into the very specific use-case where this tunnel can work without issues but you have difficulty using it with the other purpose-built applications.
 
 ### HTTP WebSocket imitator
 
