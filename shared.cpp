@@ -39,7 +39,8 @@
 #define LENGTH_VAR 0
 #define LENGTH_16BIT 1
 #define LENGTH_NONE 2
-#define MTU_SIZE 1500
+#define STD_MTU_SIZE 1500
+#define MTU_SIZE USHRT_MAX
 
 #define IP_SIZE sizeof(struct sockaddr_in)
 #define IP6_SIZE sizeof(struct sockaddr_in6)
@@ -363,6 +364,8 @@ int parse_protocol_tag(char *tag)
 int parse_endpoint_arg(char* argument, int *proto_dest, struct sockaddr_in *addr_dest)
 {
     char* token = strtok(argument, ":");
+    if (token == NULL) return EXIT_FAILURE;
+
     int proto = parse_protocol_tag(token);
 
     if (proto == -1)
@@ -373,6 +376,7 @@ int parse_endpoint_arg(char* argument, int *proto_dest, struct sockaddr_in *addr
     *proto_dest = proto;
     
     token = strtok(NULL, ":");
+    if (token == NULL) return EXIT_FAILURE;
 
     bool is_v6 = false;
     char addr6str[INET6_ADDRSTRLEN];
@@ -567,11 +571,13 @@ int parse_arguments(int argc, char* argv[], struct session *s)
 
     if (parse_endpoint_arg(remotehost, &s->remote_proto, &s->remote_addr) != EXIT_SUCCESS)
     {
+        fprintf(stderr, "Failed to parse remote endpoint.\n");
         return EXIT_FAILURE;
     }
 
     if (parse_endpoint_arg(localhost, &s->local_proto, &s->local_addr) != EXIT_SUCCESS)
     {
+        fprintf(stderr, "Failed to parse local endpoint.\n");
         return EXIT_FAILURE;
     }
 
