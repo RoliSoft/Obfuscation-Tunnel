@@ -97,6 +97,12 @@ protected:
 
         if (this->encoding != LENGTH_NONE)
         {
+            if (msglen > MTU_SIZE)
+            {
+                fprintf(stderr, "Refusing to send packet that is too large (%zd > MTU).\n", msglen);
+                return 0;
+            }
+
             if (this->encoding == LENGTH_VAR)
             {
                 write_14bit(msglen, buffer, &sizelen);
@@ -135,7 +141,7 @@ protected:
 
             if (toread > MTU_SIZE)
             {
-                printf("Incorrect size read from buffer, abandoning read.\n");
+                printf("Incorrect size read from buffer (%d > MTU), abandoning connection.\n", toread);
                 return 0;
             }
 

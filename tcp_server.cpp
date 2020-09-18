@@ -93,6 +93,8 @@ public:
 
     int restart()
     {
+        close(this->client_fd);
+
         printf("Waiting for next client...\n");
         return _accept();
     }
