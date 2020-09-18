@@ -14,9 +14,11 @@ protected:
     {
         *((unsigned short*)&buffer[-ICMP_LEN]) = reply ? 0x81 : 0x80; // type -> echo reply or request
         *((unsigned short*)&buffer[-ICMP_LEN + 4]) = reply && this->random_id ? htons(this->identifier) : 0x3713; // identifier
-        *((unsigned short*)&buffer[-ICMP_LEN + 6]) = reply ? htons(this->sequence) : htons(this->sequence++); // sequence
+        *((unsigned short*)&buffer[-ICMP_LEN + 6]) = htons(this->sequence); // sequence
         *((unsigned short*)&buffer[-ICMP_LEN + 2]) = 0; // zero checksum before calculation
         *((unsigned short*)&buffer[-ICMP_LEN + 2]) = ip_checksum(&buffer[-ICMP_LEN], msglen + ICMP_LEN);
+
+        if (!reply) ++this->sequence;
 
         int res = sendto(fd, buffer - ICMP_LEN, msglen + ICMP_LEN, 0, (const struct sockaddr*)addr, IP6_SIZE);
 
