@@ -23,8 +23,16 @@ transport_base* create_transport(int protocol, struct sockaddr_in *address, bool
             else        return new udp_client(*address, session);
         
         case PROTO_TCP:
-            if (server) return new tcp_server(*address, session);
-            else        return new tcp_client(*address, session);
+            if (server) return new tcp_server(*address, false, session);
+            else        return new tcp_client(*address, false, session);
+
+        case PROTO_TLS:
+            if (server) return new tcp_server(*address, true, session);
+            else        return new tcp_client(*address, true, session);
+
+        case PROTO_DTLS: // todo
+            if (server) return new udp_server(*address, session);
+            else        return new udp_client(*address, session);
 
         case PROTO_ICMP:
             if (server) return new icmp_server(*address, session);

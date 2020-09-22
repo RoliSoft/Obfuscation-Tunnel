@@ -2,12 +2,23 @@
 #include "shared.cpp"
 #include "transport_base.cpp"
 
+#if HAVE_TLS
+    #include <openssl/ssl.h>
+#endif
+
 class tcp_base : virtual public transport_base
 {
+protected:
+#if HAVE_TLS
+    SSL_CTX *ssl_ctx;
+    SSL *ssl;
+#endif
+
 public:
     int encoding = LENGTH_VAR;
+    bool tls = false;
 
-    static inline unsigned short read_14bit(int fd)
+    inline unsigned short read_14bit(int fd)
     {
         int shift = 0;
         unsigned short value = 0;
@@ -21,7 +32,19 @@ public:
                 break;
             }
 
-            socklen_t msglen = read(fd, &current, sizeof(unsigned char));
+            socklen_t msglen;
+#if HAVE_TLS
+            if (this->tls)
+            {
+                msglen = SSL_read(this->ssl, &current, sizeof(unsigned char));
+            }
+            else
+            {
+#endif
+                msglen = read(fd, &current, sizeof(unsigned char));
+#if HAVE_TLS
+            }
+#endif
 
             if (msglen == 0)
             {
@@ -59,10 +82,23 @@ public:
         }
     }
 
-    static inline unsigned short read_16bit(int fd)
+    inline unsigned short read_16bit(int fd)
     {
         unsigned short size = 0;
-        socklen_t msglen = read(fd, &size, sizeof(unsigned short));
+        socklen_t msglen;
+
+#if HAVE_TLS
+        if (this->tls)
+        {
+            msglen = SSL_read(this->ssl, &size, sizeof(unsigned short));
+        }
+        else
+        {
+#endif
+            msglen = read(fd, &size, sizeof(unsigned short));
+#if HAVE_TLS
+        }
+#endif
 
         if (msglen == 0)
         {
@@ -72,7 +108,18 @@ public:
 
         if (msglen == 1)
         {
-            msglen = read(fd, ((char*)&size) + 1, sizeof(unsigned char));
+#if HAVE_TLS
+            if (this->tls)
+            {
+                msglen = SSL_read(this->ssl, ((char*)&size) + 1, sizeof(unsigned char));
+            }
+            else
+            {
+#endif
+                msglen = read(fd, ((char*)&size) + 1, sizeof(unsigned char));
+#if HAVE_TLS
+            }
+#endif
 
             if (msglen == 0)
             {
@@ -113,7 +160,19 @@ protected:
             }
         }
 
-        int res = write(fd, buffer - sizelen, msglen + sizelen);
+        int res;
+#if HAVE_TLS
+        if (this->tls)
+        {
+            res = SSL_write(this->ssl, buffer - sizelen, msglen + sizelen);
+        }
+        else
+        {
+#endif
+            res = write(fd, buffer - sizelen, msglen + sizelen);
+#if HAVE_TLS
+        }
+#endif
 
         if (res < 0 && run)
         {
@@ -149,7 +208,19 @@ protected:
 
             while (run && toread > 0)
             {
-                ssize_t msglen = read(fd, buffer + (readsize - toread), toread);
+                ssize_t msglen;
+#if HAVE_TLS
+                if (this->tls)
+                {
+                    msglen = SSL_read(this->ssl, buffer + (readsize - toread), toread);
+                }
+                else
+                {
+#endif
+                    msglen = read(fd, buffer + (readsize - toread), toread);
+#if HAVE_TLS
+                }
+#endif
 
                 if (this->verbose && toread != msglen)
                 {
@@ -161,7 +232,18 @@ protected:
         }
         else
         {
-            readsize = read(fd, buffer, MTU_SIZE);
+#if HAVE_TLS
+            if (this->tls)
+            {
+                readsize = SSL_read(this->ssl, buffer, MTU_SIZE);
+            }
+            else
+            {
+#endif
+                readsize = read(fd, buffer, MTU_SIZE);
+#if HAVE_TLS
+            }
+#endif
 
             if (readsize < 1)
             {
@@ -177,8 +259,32 @@ protected:
     }
 
 protected:
-    tcp_base(int encoding = LENGTH_VAR)
-        : encoding(encoding)
+    tcp_base(int encoding = LENGTH_VAR, bool tls = false)
+        : encoding(encoding), tls(tls)
     {
+#if HAVE_TLS
+        if (this->tls)
+        {
+            SSL_library_init();
+            SSL_load_error_strings();
+        }
+#endif
     }
+
+#if HAVE_TLS
+    void cleanup_ssl()
+    {
+        if (this->ssl != nullptr)
+        {
+            SSL_free(this->ssl);
+            this->ssl = nullptr;
+        }
+
+        if (this->ssl_ctx != nullptr)
+        {
+            SSL_CTX_free(this->ssl_ctx);
+            this->ssl_ctx = nullptr;
+        }
+    }
+#endif
 };

@@ -27,6 +27,9 @@
 #ifndef HAVE_PCAP
     #define HAVE_PCAP 1
 #endif
+#ifndef HAVE_TLS
+    #define HAVE_TLS 1
+#endif
 
 #if HAVE_PCAP
     #include <pcap/pcap.h>
@@ -34,8 +37,10 @@
 
 #define PROTO_UDP 0
 #define PROTO_TCP 1
-#define PROTO_ICMP 2
-#define PROTO_ICMP6 3
+#define PROTO_TLS 2
+#define PROTO_DTLS 3
+#define PROTO_ICMP 4
+#define PROTO_ICMP6 5
 #define LENGTH_VAR 0
 #define LENGTH_16BIT 1
 #define LENGTH_NONE 2
@@ -56,6 +61,8 @@
 #define ICMP6_SKIP ICMP_LEN
 #define PCAP_ICMP_SKIP (ETHHDR_LEN + IPHDR_LEN + ICMP_LEN)
 #define PCAP_ICMP6_SKIP (ETHHDR_LEN + IP6HDR_LEN + ICMP_LEN)
+
+#define TLS_DEFAULT_CN "localhost"
 
 #define min(X, Y) (((X) < (Y)) ? (X) : (Y))
 #define max(X, Y) (((X) > (Y)) ? (X) : (Y))
@@ -83,6 +90,13 @@ struct session
 #if HAVE_PCAP
     bool pcap;
     char *cap_dev;
+#endif
+#if HAVE_TLS
+    bool tls_no_verify;
+    char *tls_host;
+    char *tls_ca_bundle;
+    char *tls_cert_file;
+    char *tls_key_file;
 #endif
 
     // local server configured with -l
@@ -345,6 +359,14 @@ int parse_protocol_tag(char *tag)
     else if (strcmp(tag, "tcp") == 0)
     {
         return PROTO_TCP;
+    }
+    else if (strcmp(tag, "tls") == 0)
+    {
+        return PROTO_TLS;
+    }
+    else if (strcmp(tag, "dtls") == 0)
+    {
+        return PROTO_DTLS;
     }
     else if (strcmp(tag, "icmp") == 0)
     {
