@@ -13,7 +13,7 @@ arguments:
 
    -l endpoint  Local listening protocol, address and port.
                   Example: tcp:127.0.0.1:80 / icmp6:[::1]
-                  Supported protocols: udp, tcp, icmp, imcp6.
+                  Supported protocols: udp, dtls, tcp, tls, icmp, imcp6.
    -r endpoint  Remote host to tunnel packets to.
    -o [mode]    Enable packet obfuscation. Possible values:
                   header - Simple generic header obfuscation (Default)
@@ -26,7 +26,7 @@ arguments:
                   http_ws_server - Accept data in HTTP WebSocket streams
    -s           Disable multithreading, multiplex sockets instead.
    -v           Detailed logging at the expense of decreased throughput.
-   -h           Displays this message.
+   -h, --help   Displays this message.
 
 TCP-specific arguments:
 
@@ -46,6 +46,14 @@ DNS-specific arguments:
 
    -f           Base32-encode data and fragment labels on 60-byte boundaries.
    -d domain    Optional domain name to act as the authoritative resolver for.
+
+(D)TLS-specific arguments:
+
+   --tls-no-verify  Ignore certificate validation errors of remote server.
+   --tls-ca-bundle  Path to CA bundle, if not found automatically by OpenSSL.
+   --tls-cert       Path to SSL certificate file in PEM format.
+                      Optional, otherwise it will be auto-generated and self-signed.
+   --tls-key        Path to SSL private key file in PEM format.
 ```
 
 Example for UDP-to-UDP tunnel:

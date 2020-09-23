@@ -16,6 +16,7 @@
 #include <signal.h>
 #include <pthread.h>
 #include <errno.h>
+#include <getopt.h>
 #include <vector>
 #include <thread>
 
@@ -93,7 +94,6 @@ struct session
 #endif
 #if HAVE_TLS
     bool tls_no_verify;
-    char *tls_host;
     char *tls_ca_bundle;
     char *tls_cert_file;
     char *tls_key_file;
@@ -327,14 +327,14 @@ int resolve_host6(const char *addr, struct sockaddr_in6 *sockaddr)
 void print_help(char* argv[])
 {
     printf("usage: %s -l proto:addr:port -r proto:addr:port [args]\narguments:\n\n", argv[0]);
-    printf("   -l endpoint\tLocal listening protocol, address and port.\n   \t\t  Example: tcp:127.0.0.1:80 / icmp6:[::1]\n   \t\t  Supported protocols: udp, tcp, icmp, imcp6.\n");
+    printf("   -l endpoint\tLocal listening protocol, address and port.\n   \t\t  Example: tcp:127.0.0.1:80 / icmp6:[::1]\n   \t\t  Supported protocols: udp, dtls, tcp, tls, icmp, imcp6.\n");
     printf("   -r endpoint\tRemote host to tunnel packets to.\n");
     printf("   -o [mode]\tEnable packet obfuscation. Possible values:\n   \t\t  header - Simple generic header obfuscation (Default)\n   \t\t  xor - XOR packet obfuscation with rolling key\n");
     printf("   -k key\tSpecifies a key for the obfuscator module.\n");
     printf("   -m mode\tEnable protocol imitator. Possible values:\n   \t\t  dns_client - Send data as A queries to remote\n   \t\t  dns_server - Reply to A queries on local\n   \t\t  http_ws_client - Masquarade as HTTP WebSocket stream\n   \t\t  http_ws_server - Accept data in HTTP WebSocket streams\n");
     printf("   -s\t\tDisable multithreading, multiplex sockets instead.\n");
     printf("   -v\t\tDetailed logging at the expense of decreased throughput.\n");
-    printf("   -h\t\tDisplays this message.\n");
+    printf("   -h, --help\tDisplays this message.\n");
     printf("\nTCP-specific arguments:\n\n");
     printf("   -e\t\tType of encoding to use for the length header:\n   \t\t  v - 7-bit encoded variable-length header (Default)\n   \t\t  s - 2-byte unsigned short\n   \t\t  n - None (Not recommended)\n");
     printf("\nICMP/ICMPv6-specific arguments:\n\n");
@@ -345,6 +345,11 @@ void print_help(char* argv[])
     printf("\nDNS-specific arguments:\n\n");
     printf("   -f\t\tBase32-encode data and fragment labels on 60-byte boundaries.\n");
     printf("   -d domain\tOptional domain name to act as the authoritative resolver for.\n");
+    printf("\n(D)TLS-specific arguments:\n\n");
+    printf("   --tls-no-verify  Ignore certificate validation errors of remote server.\n");
+    printf("   --tls-ca-bundle  Path to CA bundle, if not found automatically by OpenSSL.\n");
+    printf("   --tls-cert\t    Path to SSL certificate file in PEM format.\n   \t\t      Optional, otherwise it will be auto-generated and self-signed.\n");
+    printf("   --tls-key\t    Path to SSL private key file in PEM format.\n");
 }
 
 int parse_protocol_tag(char *tag)
@@ -486,18 +491,26 @@ int parse_endpoint_arg(char* argument, int *proto_dest, char **host, struct sock
 
 int parse_arguments(int argc, char* argv[], struct session *s)
 {
-    char *localhost = NULL, *remotehost = NULL;
-
     if (argc == 1)
     {
         print_help(argv);
         return EXIT_SUCCESS;
     }
 
+    char *localhost = NULL, *remotehost = NULL;
     memset(s, 0, sizeof(*s));
 
-    int opt;
-    while((opt = getopt(argc, argv, ":hl:r:o:p:sk:m:ve:xfd:")) != -1)
+    static struct option long_options[] = {
+        { "tls-ca-bundle",   required_argument, 0,  0  },
+        { "tls-no-verify",   no_argument,       0,  0  },
+        { "tls-cert",        required_argument, 0,  0  },
+        { "tls-key",         required_argument, 0,  0  },
+        { "help",            required_argument, 0, 'h' },
+        { 0,                 0,                 0,  0  }
+    };
+
+    int opt, opt_idx = 0;
+    while((opt = getopt_long(argc, argv, ":hl:r:o:p:sk:m:ve:xfd:", long_options, &opt_idx)) != -1)
     {
         if (opt == ':' && optopt != opt)
         {
@@ -506,6 +519,25 @@ int parse_arguments(int argc, char* argv[], struct session *s)
 
         switch (opt)
         {
+            case 0:
+                if (strcmp(long_options[opt_idx].name, "tls-ca-bundle") == 0)
+                {
+                    s->tls_ca_bundle = optarg;
+                }
+                else if (strcmp(long_options[opt_idx].name, "tls-no-verify") == 0)
+                {
+                    s->tls_no_verify = true;
+                }
+                else if (strcmp(long_options[opt_idx].name, "tls-cert") == 0)
+                {
+                    s->tls_cert_file = optarg;
+                }
+                else if (strcmp(long_options[opt_idx].name, "tls-key") == 0)
+                {
+                    s->tls_key_file = optarg;
+                }
+                break;
+
             case 'h':
                 print_help(argv);
                 return EXIT_SUCCESS;
