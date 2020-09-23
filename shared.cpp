@@ -101,11 +101,13 @@ struct session
 
     // local server configured with -l
     int local_proto;
+    char *local_host;
     struct sockaddr_in local_addr;
     char __local_addr_pad[IP6_SIZE - IP_SIZE];
 
     // remote gateway or end server configured with -r
     int remote_proto;
+    char *remote_host;
     struct sockaddr_in remote_addr;
     char __remote_addr_pad[IP6_SIZE - IP_SIZE];
 };
@@ -383,7 +385,7 @@ int parse_protocol_tag(char *tag)
     }
 }
 
-int parse_endpoint_arg(char* argument, int *proto_dest, struct sockaddr_in *addr_dest)
+int parse_endpoint_arg(char* argument, int *proto_dest, char **host, struct sockaddr_in *addr_dest)
 {
     char* token = strtok(argument, ":");
     if (token == NULL) return EXIT_FAILURE;
@@ -450,6 +452,9 @@ int parse_endpoint_arg(char* argument, int *proto_dest, struct sockaddr_in *addr
 
     if (proto == PROTO_ICMP6 || is_v6)
     {
+        *host = (char*)malloc(strlen(addr6str) + 1);
+        strcpy(*host, addr6str);
+
         if (resolve_host6(is_v6 ? addr6str : token, (struct sockaddr_in6*)addr_dest) != 0)
         {
             return EXIT_FAILURE;
@@ -457,6 +462,9 @@ int parse_endpoint_arg(char* argument, int *proto_dest, struct sockaddr_in *addr
     }
     else
     {
+        *host = (char*)malloc(strlen(token) + 1);
+        strcpy(*host, token);
+
         if (resolve_host(token, addr_dest) != 0)
         {
             return EXIT_FAILURE;
@@ -591,13 +599,13 @@ int parse_arguments(int argc, char* argv[], struct session *s)
         return EXIT_FAILURE;
     }
 
-    if (parse_endpoint_arg(remotehost, &s->remote_proto, &s->remote_addr) != EXIT_SUCCESS)
+    if (parse_endpoint_arg(remotehost, &s->remote_proto, &s->remote_host, &s->remote_addr) != EXIT_SUCCESS)
     {
         fprintf(stderr, "Failed to parse remote endpoint.\n");
         return EXIT_FAILURE;
     }
 
-    if (parse_endpoint_arg(localhost, &s->local_proto, &s->local_addr) != EXIT_SUCCESS)
+    if (parse_endpoint_arg(localhost, &s->local_proto, &s->local_host, &s->local_addr) != EXIT_SUCCESS)
     {
         fprintf(stderr, "Failed to parse local endpoint.\n");
         return EXIT_FAILURE;

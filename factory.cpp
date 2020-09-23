@@ -3,6 +3,7 @@
 #include "forwarders.cpp"
 #include "udp_client.cpp"
 #include "udp_server.cpp"
+#include "dtls_server.cpp"
 #include "tcp_client.cpp"
 #include "tcp_server.cpp"
 #include "icmp_client.cpp"
@@ -27,12 +28,22 @@ transport_base* create_transport(int protocol, struct sockaddr_in *address, bool
             else        return new tcp_client(*address, false, session);
 
         case PROTO_TLS:
+#if HAVE_TLS
             if (server) return new tcp_server(*address, true, session);
             else        return new tcp_client(*address, true, session);
+#else
+            fprintf(stderr, "This version was not compiled with OpenSSL support.\n");
+            return nullptr;
+#endif
 
-        case PROTO_DTLS: // todo
-            if (server) return new udp_server(*address, session);
+        case PROTO_DTLS:
+#if HAVE_TLS
+            if (server) return new dtls_server(*address, session);
             else        return new udp_client(*address, true, session);
+#else
+            fprintf(stderr, "This version was not compiled with OpenSSL support.\n");
+            return nullptr;
+#endif
 
         case PROTO_ICMP:
             if (server) return new icmp_server(*address, session);

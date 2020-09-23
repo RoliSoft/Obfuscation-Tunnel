@@ -16,7 +16,7 @@ private:
 
 public:
     tcp_server(struct sockaddr_in local_addr, bool tls, struct session* session)
-        : transport_base(session->verbose), tcp_base(session->length_type, tls), local_addr(local_addr), cert_cn(session->tls_host), cert_file(session->tls_cert_file), key_file(session->tls_key_file)
+        : transport_base(session->verbose), tcp_base(session->length_type, tls), local_addr(local_addr), cert_cn(session->local_host), cert_file(session->tls_cert_file), key_file(session->tls_key_file)
     {
     }
 
@@ -72,7 +72,7 @@ private:
                 ERR_print_errors_fp(stderr);
                 return EXIT_FAILURE;
             }
-            
+
             if (SSL_CTX_use_PrivateKey(this->ssl_ctx, this->ssl_key) <= 0)
             {
                 fprintf(stderr, "Failed to load private key: ");
@@ -163,7 +163,7 @@ public:
         {
             if ((this->ssl_cert == nullptr || this->ssl_key == nullptr) && (this->cert_file == nullptr || this->key_file == nullptr))
             {
-                printf("Generating temporary self-signed certificate for this session...\n");
+                printf("Generating temporary self-signed certificate for %s...\n", this->cert_cn);
 
                 if (ssl_gen_cert(this->cert_cn == nullptr ? TLS_DEFAULT_CN : this->cert_cn, &this->ssl_cert, &this->ssl_key) != EXIT_SUCCESS)
                 {

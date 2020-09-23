@@ -5,6 +5,10 @@
 #include <openssl/err.h>
 #include <openssl/x509.h>
 #include <openssl/x509v3.h>
+#include <openssl/rand.h>
+
+bool cookie_init = 0;
+unsigned char cookie_secret[16];
 
 static void print_cert_hash(X509* cert)
 {
@@ -17,6 +21,71 @@ static void print_cert_hash(X509* cert)
         if (i % 2 == 0 && i != 0) printf(":");
         printf("%02x", hash[i]);
     }
+}
+
+int generate_cookie(SSL *ssl, unsigned char *cookie, unsigned int *cookie_len)
+{
+    unsigned char *buffer, result[EVP_MAX_MD_SIZE];
+    unsigned int length = 0, result_len;
+    struct sockaddr_in peer;
+
+    if (!cookie_init)
+    {
+        if (!RAND_bytes(cookie_secret, sizeof(cookie_secret)))
+        {
+            fprintf(stderr, "Error generating cookie secret.\n");
+            return 0;
+        }
+
+        cookie_init = 1;
+    }
+
+    BIO_dgram_get_peer(SSL_get_rbio(ssl), &peer);
+
+    length = sizeof(struct in_addr) + sizeof(in_port_t);
+    buffer = (unsigned char*)OPENSSL_malloc(length);
+
+    memcpy(buffer, &peer.sin_port, sizeof(in_port_t));
+    memcpy(buffer + sizeof(peer.sin_port), &peer.sin_addr, sizeof(struct in_addr));
+
+    HMAC(EVP_sha1(), (const void*)cookie_secret, sizeof(cookie_secret), (const unsigned char*)buffer, length, result, &result_len);
+    OPENSSL_free(buffer);
+
+    memcpy(cookie, result, result_len);
+    *cookie_len = result_len;
+
+    return 1;
+}
+
+int verify_cookie(SSL *ssl, const unsigned char *cookie, unsigned int cookie_len)
+{
+    unsigned char *buffer, result[EVP_MAX_MD_SIZE];
+    unsigned int length = 0, result_len;
+    struct sockaddr_in peer;
+
+    if (!cookie_init)
+    {
+        fprintf(stderr, "Verification called before cookie secret is initialized.\n");
+        return 0;
+    }
+
+    BIO_dgram_get_peer(SSL_get_rbio(ssl), &peer);
+
+    length = sizeof(struct in_addr) + sizeof(in_port_t);
+    buffer = (unsigned char*)OPENSSL_malloc(length);
+
+    memcpy(buffer, &peer.sin_port, sizeof(in_port_t));
+    memcpy(buffer + sizeof(peer.sin_port), &peer.sin_addr, sizeof(struct in_addr));
+
+    HMAC(EVP_sha1(), (const void*)cookie_secret, sizeof(cookie_secret), (const unsigned char*)buffer, length, result, &result_len);
+    OPENSSL_free(buffer);
+
+    if (cookie_len == result_len && memcmp(result, cookie, result_len) == 0)
+    {
+        return 1;
+    }
+
+    return 0;
 }
 
 static int ssl_gen_cert(const char *cn, X509 **cert, EVP_PKEY **key)
