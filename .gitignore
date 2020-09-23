@@ -2,3 +2,6 @@ tunnel
 *.o
 .vscode
 tunnel.dSYM
+*.crt
+*.cer
+*.key

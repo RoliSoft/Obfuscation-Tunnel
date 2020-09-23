@@ -1,10 +1,7 @@
 #pragma once
 #include "shared.cpp"
 #include "transport_base.cpp"
-
-#if HAVE_TLS
-    #include <openssl/ssl.h>
-#endif
+#include "tls_helpers.cpp"
 
 class tcp_base : virtual public transport_base
 {

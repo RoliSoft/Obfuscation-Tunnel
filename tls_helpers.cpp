@@ -1,6 +1,7 @@
 #pragma once
 #include "shared.cpp"
 #if HAVE_TLS
+#include <openssl/ssl.h>
 #include <openssl/err.h>
 #include <openssl/x509.h>
 #include <openssl/x509v3.h>
