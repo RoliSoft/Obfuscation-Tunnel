@@ -79,6 +79,10 @@ private:
                     ERR_print_errors_fp(stderr);
                     break;
                 
+                case 0:
+                    printf("Failed to send packet.\n");
+                    break;
+                
                 case SSL_R_CERTIFICATE_VERIFY_FAILED:
                     fprintf(stderr, "certificate verification failed.\n");
                     fatal = true;
@@ -149,7 +153,11 @@ public:
         if (this->tls)
         {
             printf("Performing DTLS handshake...\n");
-            _handshake();
+
+            if (_handshake() != EXIT_SUCCESS)
+            {
+                return EXIT_FAILURE;
+            }
         }
 #endif
 

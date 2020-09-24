@@ -22,6 +22,11 @@ protected:
 #if HAVE_TLS
         if (this->tls)
         {
+            if (this->ssl == nullptr)
+            {
+                return -1;
+            }
+
             res = SSL_write(this->ssl, buffer, msglen);
         }
         else
@@ -48,6 +53,11 @@ protected:
 #if HAVE_TLS
         if (this->tls)
         {
+            if (this->ssl == nullptr)
+            {
+                return -1;
+            }
+
             msglen = SSL_read(this->ssl, buffer, MTU_SIZE);
         }
         else
