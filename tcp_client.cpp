@@ -13,6 +13,7 @@ private:
     char *tls_remote_host;
     bool tls_no_verify = false;
     char *tls_ca_path = nullptr;
+    bool tls_delay = false;
 
 public:
     tcp_client(struct sockaddr_in remote_addr, bool tls, struct session* session)
@@ -26,11 +27,116 @@ public:
     }
 
 private:
+#if HAVE_TLS
+    int _do_tls()
+    {
+        ERR_clear_error();
+        const SSL_METHOD *method = TLS_client_method();
+        this->ssl_ctx = SSL_CTX_new(method);
+
+        if (SSL_CTX_set_min_proto_version(this->ssl_ctx, TLS1_2_VERSION) == 0)
+        {
+            fprintf(stderr, "Failed to set TLS minimum version: ");
+            ERR_print_errors_fp(stderr);
+        }
+
+        if (!this->tls_no_verify)
+        {
+            SSL_CTX_set_verify(this->ssl_ctx, SSL_VERIFY_PEER, NULL);
+
+            if (this->tls_ca_path == nullptr)
+            {
+                if (SSL_CTX_set_default_verify_paths(this->ssl_ctx) == 0)
+                {
+                    fprintf(stderr, "Failed to load system-default CA certificate bundle.\n");
+                    return EXIT_FAILURE;
+                }
+            }
+            else
+            {
+                if (SSL_CTX_load_verify_locations(this->ssl_ctx, this->tls_ca_path, NULL) == 0)
+                {
+                    fprintf(stderr, "Failed to load specified CA certificate bundle.\n");
+                    return EXIT_FAILURE;
+                }
+            }
+        }
+
+        this->ssl = SSL_new(this->ssl_ctx);
+        SSL_set_fd(this->ssl, this->fd);
+
+        if (!this->tls_no_verify)
+        {
+            SSL_set_hostflags(ssl, X509_CHECK_FLAG_NO_PARTIAL_WILDCARDS);
+            if (tls_remote_host == nullptr || !SSL_set1_host(this->ssl, this->tls_remote_host))
+            {
+                fprintf(stderr, "Failed to set hostname for TLS validation: ");
+                ERR_print_errors_fp(stderr);
+                return EXIT_FAILURE;
+            }
+        }
+
+        int res;
+        if ((res = SSL_connect(this->ssl)) == -1)
+        {
+            fprintf(stderr, "Failed to initiate TLS handshake: ");
+
+            int reason = ERR_GET_REASON(ERR_peek_error());
+            switch (reason)
+            {
+                default:
+                    ERR_print_errors_fp(stderr);
+                    break;
+                
+                case SSL_R_CERTIFICATE_VERIFY_FAILED:
+                    fprintf(stderr, "certificate verification failed.\n");
+                    //fatal = true;
+                    break;
+                
+                case SSL_R_WRONG_VERSION_NUMBER:
+                    fprintf(stderr, "endpoint not TLS-enabled or unsupported version.\n");
+                    //fatal = true;
+                    break;
+            }
+
+            close(this->fd);
+            cleanup_ssl();
+            return EXIT_FAILURE;
+        }
+
+        char name[256];
+        X509* cert = SSL_get_peer_certificate(this->ssl);
+        X509_NAME_get_text_by_NID(X509_get_subject_name(cert), NID_commonName, (char*)&name, sizeof(name));
+
+        const char *version = SSL_get_version(this->ssl);
+        const char *cipher = SSL_get_cipher(this->ssl);
+        printf("Established %s with %s using %s.\n", version, name, cipher);
+
+        if (this->tls_no_verify)
+        {
+            printf("Fingerprint of certificate is ");
+            print_cert_hash(cert);
+            printf("\n");
+        }
+        
+        X509_free(cert);
+
+        this->tls = true;
+
+        return EXIT_SUCCESS;
+    }
+#endif
+
     int _connect()
     {
         if (!run)
         {
             return EXIT_FAILURE;
+        }
+
+        if (this->tls_delay)
+        {
+            this->tls = false;
         }
 
         int res;
@@ -69,105 +175,10 @@ private:
 #if HAVE_TLS
             if (this->tls)
             {
-                ERR_clear_error();
-                const SSL_METHOD *method = TLS_client_method();
-                this->ssl_ctx = SSL_CTX_new(method);
-
-                if (SSL_CTX_set_min_proto_version(this->ssl_ctx, TLS1_2_VERSION) == 0)
+                if (_do_tls() != EXIT_SUCCESS)
                 {
-                    fprintf(stderr, "Failed to set TLS minimum version: ");
-                    ERR_print_errors_fp(stderr);
+                    return EXIT_FAILURE;
                 }
-
-                if (!this->tls_no_verify)
-                {
-                    SSL_CTX_set_verify(this->ssl_ctx, SSL_VERIFY_PEER, NULL);
-
-                    if (this->tls_ca_path == nullptr)
-                    {
-                        if (SSL_CTX_set_default_verify_paths(this->ssl_ctx) == 0)
-                        {
-                            fprintf(stderr, "Failed to load system-default CA certificate bundle.\n");
-                            return EXIT_FAILURE;
-                        }
-                    }
-                    else
-                    {
-                        if (SSL_CTX_load_verify_locations(this->ssl_ctx, this->tls_ca_path, NULL) == 0)
-                        {
-                            fprintf(stderr, "Failed to load specified CA certificate bundle.\n");
-                            return EXIT_FAILURE;
-                        }
-                    }
-                }
-
-                this->ssl = SSL_new(this->ssl_ctx);
-                SSL_set_fd(this->ssl, this->fd);
-
-                if (!this->tls_no_verify)
-                {
-                    SSL_set_hostflags(ssl, X509_CHECK_FLAG_NO_PARTIAL_WILDCARDS);
-                    if (tls_remote_host == nullptr || !SSL_set1_host(this->ssl, this->tls_remote_host))
-                    {
-                        fprintf(stderr, "Failed to set hostname for TLS validation: ");
-                        ERR_print_errors_fp(stderr);
-                        return EXIT_FAILURE;
-                    }
-                }
-
-                if ((res = SSL_connect(this->ssl)) == -1)
-                {
-                    fprintf(stderr, "Failed to initiate TLS handshake: ");
-
-                    int reason = ERR_GET_REASON(ERR_peek_error());
-                    bool fatal = false;
-                    switch (reason)
-                    {
-                        default:
-                            ERR_print_errors_fp(stderr);
-                            break;
-                        
-                        case SSL_R_CERTIFICATE_VERIFY_FAILED:
-                            fprintf(stderr, "certificate verification failed.\n");
-                            fatal = true;
-                            break;
-                        
-                        case SSL_R_WRONG_VERSION_NUMBER:
-                            fprintf(stderr, "endpoint not TLS-enabled or unsupported version.\n");
-                            fatal = true;
-                            break;
-                    }
-
-                    close(this->fd);
-                    cleanup_ssl();
-
-                    if (fatal)
-                    {
-                        return EXIT_FAILURE;
-                    }
-                    else
-                    {
-                        sleep(1);
-                        continue;
-                    }
-                }
-
-                char name[256];
-                X509* cert = SSL_get_peer_certificate(this->ssl);
-                X509_NAME_get_text_by_NID(X509_get_subject_name(cert), NID_commonName, (char*)&name, sizeof(name));
-
-                const char *version = SSL_get_version(this->ssl);
-                const char *cipher = SSL_get_cipher(this->ssl);
-                printf("Established %s with %s using %s.\n", version, name, cipher);
-
-                if (this->tls_no_verify)
-                {
-                    printf("Fingerprint of certificate is ");
-                    print_cert_hash(cert);
-                    printf("\n");
-                }
-                
-                X509_free(cert);
 
                 res = 0;
             }

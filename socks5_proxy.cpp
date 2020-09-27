@@ -88,15 +88,14 @@ public:
         this->remote_addr = tcp->remote_addr;
         this->tls = tcp->tls;
         tcp->remote_addr = this->proxy_addr;
-        tcp->tls = false;
+        tcp->tls_delay = true;
 
         return EXIT_SUCCESS;
     }
 
     virtual int handshake(transport_base *local, transport_base *remote)
     {
-        int length, offset;
-        char buffer[MTU_SIZE];
+        (void)local;
 
         tcp_client* tcp = dynamic_cast<tcp_client*>(remote);
         int original_encoding = tcp->encoding;
@@ -109,6 +108,7 @@ public:
         printf("... ");
         fflush(stdout);
 
+        int length, offset;
         length = tcp->send((char*)&this->auth, sizeof(this->auth));
 
         if (length == 0)
@@ -168,7 +168,16 @@ public:
 
         tcp->encoding = original_encoding;
         tcp->verbose = original_verbose;
-        tcp->tls = this->tls;
+
+#if HAVE_TLS
+        if (this->tls)
+        {
+            if (tcp->_do_tls() != EXIT_SUCCESS)
+            {
+                goto fail;
+            }
+        }
+#endif
 
         return EXIT_SUCCESS;
 
@@ -176,7 +185,6 @@ fail:
         tcp->stop();
         tcp->encoding = original_encoding;
         tcp->verbose = original_verbose;
-        tcp->tls = this->tls;
         return EXIT_FAILURE;
     }
 };
