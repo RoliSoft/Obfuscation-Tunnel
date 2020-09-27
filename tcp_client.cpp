@@ -5,6 +5,8 @@
 
 class tcp_client : public tcp_base
 {
+    friend class socks5_proxy;
+
 private:
     int fd;
     struct sockaddr_in remote_addr;

@@ -9,6 +9,14 @@ int loop_transports_select(transport_base *local, transport_base *remote, obfusc
     struct pollfd fds[2];
     memset(fds, 0 , sizeof(fds));
 
+    if (mocker != nullptr)
+    {
+        if (mocker->setup(local, remote) != EXIT_SUCCESS)
+        {
+            return EXIT_FAILURE;
+        }
+    }
+
     if (!local->started)
     {
         if (local->start() != EXIT_SUCCESS)
@@ -24,19 +32,11 @@ int loop_transports_select(transport_base *local, transport_base *remote, obfusc
         }
     }
 
-    if (mocker != nullptr)
+    if (mocker != nullptr && mocker->can_handshake)
     {
-        if (mocker->setup(local, remote) != EXIT_SUCCESS)
+        if (mocker->handshake(local, remote) != EXIT_SUCCESS)
         {
             return EXIT_FAILURE;
-        }
-
-        if (mocker->can_handshake)
-        {
-            if (mocker->handshake(local, remote) != EXIT_SUCCESS)
-            {
-                return EXIT_FAILURE;
-            }
         }
     }
 
@@ -184,6 +184,14 @@ int loop_transports_thread(transport_base *local, transport_base *remote, obfusc
 {
     std::thread threads[2];
 
+    if (mocker != nullptr)
+    {
+        if (mocker->setup(local, remote) != EXIT_SUCCESS)
+        {
+            return EXIT_FAILURE;
+        }
+    }
+
     if (!local->started)
     {
         if (local->start() != EXIT_SUCCESS)
@@ -199,19 +207,11 @@ int loop_transports_thread(transport_base *local, transport_base *remote, obfusc
         }
     }
 
-    if (mocker != nullptr)
+    if (mocker != nullptr && mocker->can_handshake)
     {
-        if (mocker->setup(local, remote) != EXIT_SUCCESS)
+        if (mocker->handshake(local, remote) != EXIT_SUCCESS)
         {
             return EXIT_FAILURE;
-        }
-
-        if (mocker->can_handshake)
-        {
-            if (mocker->handshake(local, remote) != EXIT_SUCCESS)
-            {
-                return EXIT_FAILURE;
-            }
         }
     }
 

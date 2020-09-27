@@ -186,6 +186,11 @@ void hexdump(const void* data, size_t size)
 	}
 }
 
+bool strprefix(const char *str, const char *pre)
+{
+    return strncmp(pre, str, strlen(pre)) == 0;
+}
+
 static inline unsigned short ip_checksum(char* data, unsigned int length)
 {
     unsigned long long acc = 0xffff;
@@ -395,14 +400,18 @@ int parse_endpoint_arg(char* argument, int *proto_dest, char **host, struct sock
     char* token = strtok(argument, ":");
     if (token == NULL) return EXIT_FAILURE;
 
-    int proto = parse_protocol_tag(token);
-
-    if (proto == -1)
+    int proto = -1;
+    if (proto_dest != nullptr)
     {
-        return EXIT_FAILURE;
-    }
+        proto = parse_protocol_tag(token);
 
-    *proto_dest = proto;
+        if (proto == -1)
+        {
+            return EXIT_FAILURE;
+        }
+
+        *proto_dest = proto;
+    }
     
     token = strtok(NULL, ":");
     if (token == NULL) return EXIT_FAILURE;
@@ -457,8 +466,11 @@ int parse_endpoint_arg(char* argument, int *proto_dest, char **host, struct sock
 
     if (proto == PROTO_ICMP6 || is_v6)
     {
-        *host = (char*)malloc(strlen(addr6str) + 1);
-        strcpy(*host, addr6str);
+        if (host != nullptr)
+        {
+            *host = (char*)malloc(strlen(addr6str) + 1);
+            strcpy(*host, addr6str);
+        }
 
         if (resolve_host6(is_v6 ? addr6str : token, (struct sockaddr_in6*)addr_dest) != 0)
         {
@@ -467,8 +479,11 @@ int parse_endpoint_arg(char* argument, int *proto_dest, char **host, struct sock
     }
     else
     {
-        *host = (char*)malloc(strlen(token) + 1);
-        strcpy(*host, token);
+        if (host != nullptr)
+        {
+            *host = (char*)malloc(strlen(token) + 1);
+            strcpy(*host, token);
+        }
 
         if (resolve_host(token, addr_dest) != 0)
         {
