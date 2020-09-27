@@ -8,17 +8,18 @@ class tcp_client : public tcp_base
 private:
     int fd;
     struct sockaddr_in remote_addr;
+    char *tls_remote_host;
     bool tls_no_verify = false;
     char *tls_ca_path = nullptr;
 
 public:
     tcp_client(struct sockaddr_in remote_addr, bool tls, struct session* session)
-        : transport_base(session->verbose), tcp_base(session->length_type, tls), remote_addr(remote_addr), tls_no_verify(session->tls_no_verify), tls_ca_path(session->tls_ca_bundle)
+        : transport_base(session->verbose), tcp_base(session->length_type, tls), remote_addr(remote_addr), tls_remote_host(session->remote_host), tls_no_verify(session->tls_no_verify), tls_ca_path(session->tls_ca_bundle)
     {
     }
 
-    tcp_client(struct sockaddr_in remote_addr, int encoding = LENGTH_VAR, bool tls = false, bool tls_no_verify = false, char *tls_ca_path = nullptr, bool verbose = false)
-        : transport_base(verbose), tcp_base(encoding, tls), remote_addr(remote_addr), tls_no_verify(tls_no_verify), tls_ca_path(tls_ca_path)
+    tcp_client(struct sockaddr_in remote_addr, int encoding = LENGTH_VAR, bool tls = false, char* tls_remote_host = nullptr, bool tls_no_verify = false, char *tls_ca_path = nullptr, bool verbose = false)
+        : transport_base(verbose), tcp_base(encoding, tls), remote_addr(remote_addr), tls_remote_host(tls_remote_host), tls_no_verify(tls_no_verify), tls_ca_path(tls_ca_path)
     {
     }
 
@@ -100,6 +101,18 @@ private:
 
                 this->ssl = SSL_new(this->ssl_ctx);
                 SSL_set_fd(this->ssl, this->fd);
+
+                if (!this->tls_no_verify)
+                {
+                    SSL_set_hostflags(ssl, X509_CHECK_FLAG_NO_PARTIAL_WILDCARDS);
+                    if (tls_remote_host == nullptr || !SSL_set1_host(this->ssl, this->tls_remote_host))
+                    {
+                        fprintf(stderr, "Failed to set hostname for TLS validation: ");
+                        ERR_print_errors_fp(stderr);
+                        return EXIT_FAILURE;
+                    }
+                }
+
                 if ((res = SSL_connect(this->ssl)) == -1)
                 {
                     fprintf(stderr, "Failed to initiate TLS handshake: ");
