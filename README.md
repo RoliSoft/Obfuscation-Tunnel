@@ -24,6 +24,7 @@ arguments:
                   dns_server - Reply to A queries on local
                   http_ws_client - Masquarade as HTTP WebSocket stream
                   http_ws_server - Accept data in HTTP WebSocket streams
+                  socks5:<addr>:<port> - Connect through a SOCKSv5 proxy
    -s           Disable multithreading, multiplex sockets instead.
    -v           Detailed logging at the expense of decreased throughput.
    -h, --help   Displays this message.
@@ -364,6 +365,8 @@ You can run this `server` instance alongside your other websites without any int
 server$ ./tunnel -l tcp:127.0.0.1:8080 -r udp:engage.cloudflareclient.com:2408 -m http_ws_server
 ```
 
+You can also replace the `tcp` protocol to `tls` (and the port number accordingly) in the `-r` argument, if you would like to connect to your gateway server via HTTPS.
+
 ## UDP tunneling
 
 The UDP tunneling part of the application is pretty straightforward, packets are sent to the destination as they are received, and vice-versa, unless obfuscation is enabled, in which case the algorithm will first process the packet, but the length of the payload is never modified.
@@ -397,6 +400,29 @@ It is possible to turn off the length header prepended to TCP packets using the 
 For UDP-based protocols, using UDP to TCP to UDP, however, turning off the length header will result in the UDP packets not being correctly reassembled on the gateway due to fragmentation occuring at the TCP stage, that the gateway server will not be aware of.
 
 In this case, it depends on the application consuming the UDP packets whether it can consume fragmented and/or merged UDP packets. For Wireguard, the connection will mostly be stable, but some performance degradation will occur, as when the header does not align to be the very first byte in the UDP packet, Wireguard will drop it.
+
+### SOCKSv5 proxy
+
+The application can connect to the remote gateway through a SOCKSv5 proxy, when the SOCKSv5 protocol imitator is enabled. In order to do this, you will have to specify `-m socks5:ip:port`, where `ip` and `port` should be substituted in with their corresponding values.
+
+Although in theory SOCKSv5 supports UDP forwarding, in practice the majority of servers do not implement this feature, so it is not currently supported in the tunnel either. This means that the remote has to be a TCP endpoint (`-r tcp:` or `-r tls:`) in order for the module to work.
+
+In its current form, the SOCKSv5 functionality is implemented as a protocol mocker, as that was the fastest way to implement such a feature via the provided API:
+
+1. During `mocker->setup()`, the remote address is swapped to connect to the SOCKSv5 proxy instead;
+2. During `mocker->handshake()`, it instructs the SOCKSv5 proxy to connect to the TCP remote address;
+3. If the SOCKSv5 proxy sends a success message, the socket is handed over to the application, as any subsequent messages will be relayed to the gateway through the proxy.
+
+Example usage to SSH through Tor: (Note, as we are connecting directly to SSH, and not to a gateway tunnel, `-e n` is specified to omit the payload length header.)
+
+```
+$ ./tunnel -l tcp:127.0.0.1:2222 -r tcp:12.34.56.78:22 -m socks5:127.0.0.1:9050 -e n  |
+Started TCP server at 127.0.0.1:2222                                                  |
+Waiting for first client...                                                           | $ ssh -p2222 127.0.0.1
+Client connected via TCP from 127.0.0.1:53811                                         | Linux [...]
+Connecting via TCP to 127.0.0.1:9050... Connected.                                    | Last login: [...]
+Connecting via SOCKSv5 proxy to 12.34.56.78:22... Connected.                          | host $ 
+```
 
 ## ICMP tunneling
 
