@@ -375,6 +375,52 @@ The most important information to be highlighted in this section, is that since 
 
 In its current state, it may be possible to temporarily hijack the data stream if the endpoint of the gateway is known, by sending a valid packet to the gateway. In case of obfuscation being turned on, the packet can be "validated" by making sure the algorithm has correctly decrypted the traffic, however, without obfuscation and appending any sort of header to the packet, the data stream is open for hijacks. This should not be a major issue, as once your local client sends another packet, the data stream will be restored back to you, given that your application can gracefully deal with the packets lost _and_ the data stream is properly encrypted, so you did not leak anything of use to the random port scanning passerby.
 
+### DTLS encryption
+
+If you would like to wrap the UDP-to-UDP tunnel into the datagram-specific version of TLS, you can replace the `udp` protocol in `-l` or `-r` to `dtls`.
+
+As it uses the standard OpenSSL implementation of DTLS, you can connect directly to a DTLS application as the remote, without needing a second tunnel as the gateway to unwrap the DTLS:
+
+```
+$ ./tunnel -l dtls:127.0.0.1:8080 -r udp:127.0.0.1:8081
+Started UDP server at 127.0.0.1:8080
+Generating temporary self-signed certificate for 127.0.0.1...
+Fingerprint of certificate is 6ef4:91bb:14b8:36a1:23c4:ca26:1376:ffae:1b9f:d15c
+Waiting for first client...
+Client connected via UDP from 127.0.0.1:61948
+Established DTLSv1.2 using ECDHE-RSA-AES256-GCM-SHA384.
+Started UDP client for 127.0.0.1:8081
+
+$ openssl s_client -dtls -connect 127.0.0.1:8080
+CONNECTED(00000003)
+---
+Certificate chain
+ 0 s:CN = 127.0.0.1
+   i:CN = 127.0.0.1
+---
+[...]
+---
+New, TLSv1.2, Cipher is ECDHE-RSA-AES256-GCM-SHA384
+Server public key is 2048 bit
+Secure Renegotiation IS supported
+Compression: NONE
+Expansion: NONE
+No ALPN negotiated
+SSL-Session:
+    Protocol  : DTLSv1.2
+[...]
+---
+test
+DONE
+
+$ nc -luvp 8081
+Received packet from 127.0.0.1:63844 -> 127.0.0.1:8081 (local)
+test
+^D
+```
+
+Futher arguments are available to control certificate management, see the **TLS encryption** section under **TCP tunneling** to learn about them, as the same applies to DTLS.
+
 ## TCP tunneling
 
 The application has support for tunneling UDP packets over TCP. In order to do this, you will have to run the TCP listener on your gateway server first, and then connect from your local client:
@@ -400,6 +446,66 @@ It is possible to turn off the length header prepended to TCP packets using the 
 For UDP-based protocols, using UDP to TCP to UDP, however, turning off the length header will result in the UDP packets not being correctly reassembled on the gateway due to fragmentation occuring at the TCP stage, that the gateway server will not be aware of.
 
 In this case, it depends on the application consuming the UDP packets whether it can consume fragmented and/or merged UDP packets. For Wireguard, the connection will mostly be stable, but some performance degradation will occur, as when the header does not align to be the very first byte in the UDP packet, Wireguard will drop it.
+
+### TLS encryption
+
+If you would like to expose a TCP server through standard TLS, or connect to a TLS server (similar to stunnel), you can replace the `tcp` protocol in either `-l` or `-r` to `tls`.
+
+TLS has two operating modes for clients:
+
+- By default, `--tls-no-verify` is not specified and `--tls-ca-bundle` is loaded from standard path. In this case, the TLS certificate of the remote host is validated, and the connection is dropped if the validation failed.
+- If `--tls-no-verify` is specified, the certificate of the remote server will not be verified, however the fingerprint of the certificate will printed for manual verification purposes.
+
+For servers, it is similar:
+
+- By default, a self-signed certificate will be generated having the `CN` value set to the hostname specified in the `-l` argument, and the fingerprint will be printed.
+- If `--tls-cert` and `--tls-key` are provided, the server will identify itself with that certificate.
+
+For example, if you would like to connect two UDP tunnels via self-signed TCP/TLS:
+
+```
+$ ./tunnel -l tls:127.0.0.1:8081 -r udp:127.0.0.1:8082
+Started TCP server at 127.0.0.1:8081
+Generating temporary self-signed certificate for 127.0.0.1...
+Fingerprint of certificate is da41:c3d2:7211:dec5:4a8e:3cda:ec12:7852:6eda:e0aa
+Waiting for first client...
+Client connected via TCP from 127.0.0.1:60987
+Established TLSv1.3 using TLS_AES_256_GCM_SHA384.
+Started UDP client for 127.0.0.1:8082
+
+$ ./tunnel -l udp:127.0.0.1:8080 -r tls:127.0.0.1:8081 --tls-no-verify
+Started UDP server at 127.0.0.1:8080
+Connecting via TCP to 127.0.0.1:8081... Connected.
+Established TLSv1.3 with 127.0.0.1 using TLS_AES_256_GCM_SHA384.
+Fingerprint of certificate is da41:c3d2:7211:dec5:4a8e:3cda:ec12:7852:6eda:e0aa
+Client connected via UDP from 127.0.0.1:62463
+
+$ nc -vu 127.0.0.1 8080
+test
+
+$ nc -luvp 8082
+Received packet from 127.0.0.1:62605 -> 127.0.0.1:8082 (local)
+test
+```
+
+As another example, if you would like to expose a TLS server to a local non-TLS port: (Similar to stunnel.)
+
+```
+$ ./tunnel -l tls:0.0.0.0:443 -r tcp:127.0.0.1:80 -e n --tls-cert cert.pem --tls-key cert.key
+Started TCP server at 0.0.0.0:443
+Loaded certificate for example.com, issued by Let's Encrypt Authority X3.
+Waiting for first client...
+Client connected via TCP from 127.0.0.1:60819
+Established TLSv1.3 using TLS_AES_256_GCM_SHA384.
+Connecting via TCP to 127.0.0.1:80... Connected.
+
+$ ncat --ssl 127.0.0.1 443
+test
+
+$ nc -lvp 80                           
+Connection from 127.0.0.1:60820
+test
+```
 
 ### SOCKSv5 proxy
 
